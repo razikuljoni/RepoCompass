@@ -541,6 +541,12 @@ button {
   z-index: 30;
   padding: 20px;
 }
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: transparent;
+}
 .dmodal {
   width: min(650px, 100%);
   position: relative;

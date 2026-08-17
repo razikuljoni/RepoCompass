@@ -16,16 +16,16 @@ The core rule is simple: explanations must point back to real repository evidenc
 - Automatically exclude heavy/generated paths such as `node_modules`, `.git`, `.next`, `dist`, `build`, `coverage`, `.turbo`, `.cache`, `vendor`, `target`, and `out`
 - Repository-driven overview metrics, language distribution, branches, and commits
 - Expandable code explorer with folder/file icons and recursive file totals
-- Searchable symbols, imports, exports, dependencies, routes, and source previews
-- Architecture graph and detail views
-- Evidence-backed repository questions with verified/inferred labels
-- Impact Lab with callers, dependencies, routes, tests, contracts, and ownership context
-- Security findings with severity, CWE references, and exact code evidence
-- Risk, coupling, supply-chain, and maintainability recommendations
+- Path and symbol search with import, dependency, route, and source previews
+- Architecture summaries derived from repository structure
+- Evidence-backed deterministic repository search with explicit unavailable states
+- Path-level Impact Lab with related files, tests, and workflow context
+- Deterministic security signals with file and line evidence where available
+- Structural risk and maintainability recommendations
 - Repository-specific glossary and contributor onboarding path
-- Branch comparison and architecture-drift capability boundaries
+- Explicit branch and architecture-drift capability boundaries
 - GitHub-aligned responsive interface
-- Commit-pinned investigation links and integration workspace
+- Versioned graph contracts with validated provenance, evidence, and immutable snapshot identity
 
 ## How analysis works
 
@@ -80,7 +80,9 @@ pnpm format:check       # Check formatting without changing files
 pnpm typecheck          # Run the TypeScript compiler
 pnpm check              # Run formatting, linting, and type checks
 pnpm build              # Create and validate the production artifact
-pnpm test               # Build and run rendered-output tests
+pnpm test:unit          # Run deterministic graph and model tests
+pnpm test:artifact      # Build and test the rendered artifact
+pnpm test               # Run unit and rendered-artifact tests
 pnpm validate:artifact  # Validate an existing build artifact
 ```
 
@@ -104,7 +106,7 @@ Security findings should originate from deterministic rules or scanners. AI may 
 
 ## Current scope
 
-The deployed version performs real provider/local ingestion and content-derived analysis within safe browser limits. Production-scale exhaustive AST analysis, deep SAST, private-repository OAuth, persistent analysis history, background jobs, webhook-based incremental indexing, and full multi-snapshot architecture drift remain backend milestones.
+The deployed version performs real provider/local ingestion and regex- and path-derived analysis within safe browser limits. The codebase now includes a versioned, runtime-validated graph contract with deterministic canonicalization and an adapter that preserves the current workspace model. The current indexer does not yet populate that richer contract with AST-resolved calls or references. Production-scale exhaustive AST analysis, graph persistence and querying, deep SAST, private-repository OAuth, background jobs, webhook-based incremental indexing, and full multi-snapshot architecture drift remain backend milestones.
 
 See [PRODUCT_PLAN.md](./PRODUCT_PLAN.md) for the staged implementation roadmap.
 

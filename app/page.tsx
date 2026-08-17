@@ -1,5 +1,9 @@
 "use client";
 import { useMemo, useRef, useState } from "react";
+import { contentModel } from "@/lib/analysis/content-model";
+import { codeExtensions, extensionOf } from "@/lib/analysis/file-classification";
+import type { AnalyzeRepositoryResponse, Repo } from "@/lib/domain/repository";
+import type { Model } from "@/lib/domain/repository-model";
 
 type View =
   | "overview"
@@ -15,43 +19,6 @@ type View =
   | "integrations"
   | "onboarding"
   | "compare";
-type IndexedFile = { path: string; size?: number; content?: string };
-type Repo = {
-  owner: string;
-  name: string;
-  provider: string;
-  branch: string;
-  branches?: string[];
-  commits?: Array<{ sha: string; message: string; author: string; date: string }>;
-  files: number;
-  ignored: number;
-  bytes: number;
-  description?: string;
-  stars?: number;
-  languages: Array<{ name: string; count: number }>;
-  sampleFiles: string[];
-  indexedFiles?: IndexedFile[];
-  source: "remote" | "local";
-};
-type Edge = { from: string; to: string; kind: "import" | "require" };
-type SymbolInfo = { name: string; kind: string; file: string; line: number };
-type Model = {
-  topDirs: Array<{ name: string; count: number }>;
-  extensions: Array<{ name: string; count: number }>;
-  sourceFiles: string[];
-  testFiles: string[];
-  configFiles: string[];
-  docs: string[];
-  workflows: string[];
-  security: Array<{ level: string; title: string; detail: string; file?: string; line?: number }>;
-  risks: Array<{ title: string; detail: string; score: number; file?: string }>;
-  recommendations: Array<{ priority: string; title: string; reason: string }>;
-  edges?: Edge[];
-  symbols?: SymbolInfo[];
-  routes?: Array<{ method: string; path: string; file: string }>;
-  dependencies?: string[];
-  terms?: Array<{ term: string; detail: string; evidence: string }>;
-};
 const ignored = [
   "node_modules",
   ".git",
@@ -80,298 +47,12 @@ const nav: Array<{ id: View; label: string; icon: string }> = [
   { id: "onboarding", label: "Contributor path", icon: "↗" },
   { id: "compare", label: "Branches", icon: "⇄" },
 ];
-const codeExt = new Set([
-  "ts",
-  "tsx",
-  "js",
-  "jsx",
-  "py",
-  "go",
-  "java",
-  "rb",
-  "php",
-  "rs",
-  "c",
-  "cpp",
-  "cs",
-  "swift",
-  "kt",
-  "vue",
-  "svelte",
-]);
-function ext(path: string) {
-  const file = path.split("/").at(-1) || "";
-  return file.includes(".") ? (file.split(".").at(-1) || "").toLowerCase() : "none";
-}
 function bytes(value: number) {
   if (!value) return "0 B";
   const u = ["B", "KB", "MB", "GB"],
     i = Math.min(3, Math.floor(Math.log(value) / Math.log(1024)));
   return `${(value / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`;
 }
-function buildModel(repo: Repo): Model {
-  const paths = repo.sampleFiles || [];
-  const top = new Map<string, number>(),
-    ex = new Map<string, number>();
-  for (const p of paths) {
-    const first = p.split("/")[0] || "root";
-    top.set(first, (top.get(first) || 0) + 1);
-    const e = ext(p);
-    ex.set(e, (ex.get(e) || 0) + 1);
-  }
-  const sourceFiles = paths.filter((p) => codeExt.has(ext(p))),
-    testFiles = paths.filter((p) => /(test|spec|__tests__)/i.test(p)),
-    configFiles = paths.filter((p) =>
-      /(package\.json|tsconfig|vite\.config|next\.config|dockerfile|compose|\.ya?ml$|\.toml$|\.env)/i.test(
-        p,
-      ),
-    ),
-    docs = paths.filter((p) => /(readme|contributing|architecture|docs\/|security\.md)/i.test(p)),
-    workflows = paths.filter((p) => /\.github\/workflows|\.gitlab-ci|bitbucket-pipelines/i.test(p));
-  const hasLock = paths.some((p) =>
-      /(package-lock|pnpm-lock|yarn\.lock|poetry\.lock|go\.sum|cargo\.lock)/i.test(p),
-    ),
-    hasSecurity = paths.some((p) => /security\.md$/i.test(p)),
-    hasEnv = paths.find((p) => /(^|\/)\.env$/i.test(p)),
-    hasTests = testFiles.length > 0,
-    hasCI = workflows.length > 0;
-  const security = [
-    ...(hasEnv
-      ? [
-          {
-            level: "High",
-            title: "Environment file is indexed",
-            detail: "Review it for secrets and remove it from version control.",
-            file: hasEnv,
-          },
-        ]
-      : []),
-    ...(!hasSecurity
-      ? [
-          {
-            level: "Medium",
-            title: "No SECURITY.md found",
-            detail: "The repository has no visible vulnerability reporting policy.",
-          },
-        ]
-      : []),
-    ...(!hasLock
-      ? [
-          {
-            level: "Medium",
-            title: "No dependency lockfile detected",
-            detail: "Dependency resolution may not be reproducible.",
-          },
-        ]
-      : []),
-    ...(!hasCI
-      ? [
-          {
-            level: "Low",
-            title: "No CI workflow detected",
-            detail: "Automated security and quality checks were not found.",
-          },
-        ]
-      : []),
-  ];
-  if (!security.length)
-    security.push({
-      level: "Info",
-      title: "No path-level security warnings",
-      detail: "Content-aware SAST is required before declaring the code secure.",
-    });
-  const biggest = [...top.entries()].sort((a, b) => b[1] - a[1])[0];
-  const risks = [
-    ...(biggest && biggest[1] > Math.max(20, paths.length * 0.55)
-      ? [
-          {
-            title: "Repository concentration",
-            detail: `${biggest[0]} contains ${biggest[1]} of ${paths.length} indexed paths.`,
-            score: 72,
-            file: biggest[0],
-          },
-        ]
-      : []),
-    ...(!hasTests
-      ? [
-          {
-            title: "No tests detected",
-            detail: "No test/spec paths were identified in the indexed tree.",
-            score: 81,
-          },
-        ]
-      : []),
-    ...(sourceFiles.length > 200 && testFiles.length < sourceFiles.length * 0.05
-      ? [
-          {
-            title: "Low test proximity",
-            detail: `${sourceFiles.length} source files map to only ${testFiles.length} test files.`,
-            score: 68,
-          },
-        ]
-      : []),
-  ];
-  if (!risks.length)
-    risks.push({
-      title: "No structural hotspot detected",
-      detail:
-        "The repository tree is reasonably distributed. Symbol-level analysis may reveal deeper coupling.",
-      score: 22,
-    });
-  const recommendations = [
-    ...(!hasTests
-      ? [
-          {
-            priority: "P0",
-            title: "Add a baseline test suite",
-            reason: "No test files were found in this repository.",
-          },
-        ]
-      : []),
-    ...(!hasCI
-      ? [
-          {
-            priority: "P1",
-            title: "Add continuous integration",
-            reason: "No provider workflow was found.",
-          },
-        ]
-      : []),
-    ...(!hasSecurity
-      ? [
-          {
-            priority: "P1",
-            title: "Create a security policy",
-            reason: "Contributors need a private vulnerability-reporting path.",
-          },
-        ]
-      : []),
-    ...(hasEnv
-      ? [
-          {
-            priority: "P0",
-            title: "Remove committed environment secrets",
-            reason: `${hasEnv} should not be versioned.`,
-          },
-        ]
-      : []),
-    {
-      priority: "P2",
-      title: "Document the project architecture",
-      reason: docs.length
-        ? `Build on the ${docs.length} existing documentation files.`
-        : "No architecture documentation was detected.",
-    },
-  ];
-  return {
-    topDirs: [...top.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 12)
-      .map(([name, count]) => ({ name, count })),
-    extensions: [...ex.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([name, count]) => ({ name, count })),
-    sourceFiles,
-    testFiles,
-    configFiles,
-    docs,
-    workflows,
-    security,
-    risks,
-    recommendations,
-  };
-}
-
-function contentModel(repo: Repo): Model {
-  const base = buildModel(repo),
-    edges: Edge[] = [],
-    symbols: SymbolInfo[] = [],
-    routes: Array<{ method: string; path: string; file: string }> = [],
-    dependencies = new Set<string>(),
-    terms: Array<{ term: string; detail: string; evidence: string }> = [],
-    security = [...base.security];
-  for (const file of repo.indexedFiles || []) {
-    if (!file.content) continue;
-    const lines = file.content.split("\n");
-    lines.forEach((line, index) => {
-      const imports = [...line.matchAll(/(?:from\s+|require\s*\(\s*)["']([^"']+)/g)];
-      for (const match of imports) {
-        edges.push({
-          from: file.path,
-          to: match[1],
-          kind: line.includes("require") ? "require" : "import",
-        });
-        if (!match[1].startsWith(".") && !match[1].startsWith("/"))
-          dependencies.add(
-            match[1]
-              .split("/")
-              .slice(0, match[1].startsWith("@") ? 2 : 1)
-              .join("/"),
-          );
-      }
-      const symbol = line.match(
-        /(?:export\s+)?(?:async\s+)?(?:function|class|interface|type|const|let)\s+([A-Za-z_$][\w$]*)/,
-      );
-      if (symbol)
-        symbols.push({
-          name: symbol[1],
-          kind: (line.match(/function|class|interface|type|const|let/) || ["symbol"])[0],
-          file: file.path,
-          line: index + 1,
-        });
-      const route = line.match(
-        /(?:app|router)\.(get|post|put|patch|delete)\s*\(\s*["'`]([^"'`]+)/i,
-      );
-      if (route) routes.push({ method: route[1].toUpperCase(), path: route[2], file: file.path });
-      if (
-        /(?:password|token|secret|api[_-]?key)\s*[:=]\s*["'][^"']{8,}["']/i.test(line) &&
-        !/(process\.env|import\.meta\.env|example|placeholder|test)/i.test(line)
-      )
-        security.push({
-          level: "High",
-          title: "Possible hard-coded credential",
-          detail: "A credential-like literal was detected. Confirm before remediation.",
-          file: file.path,
-          line: index + 1,
-        });
-      if (/\beval\s*\(|new Function\s*\(/.test(line))
-        security.push({
-          level: "High",
-          title: "Dynamic code execution",
-          detail: "Dynamic execution can turn untrusted input into executable code.",
-          file: file.path,
-          line: index + 1,
-        });
-    });
-  }
-  const packageFile = (repo.indexedFiles || []).find((f) => /(^|\/)package\.json$/.test(f.path));
-  if (packageFile?.content) {
-    try {
-      const p = JSON.parse(packageFile.content);
-      for (const key of Object.keys({ ...p.dependencies, ...p.devDependencies }))
-        dependencies.add(key);
-    } catch {}
-  }
-  for (const s of symbols.filter((x) => /^[A-Z][A-Za-z]+$/.test(x.name)).slice(0, 30))
-    terms.push({
-      term: s.name,
-      detail: `${s.kind} defined in this repository`,
-      evidence: `${s.file}:${s.line}`,
-    });
-  return {
-    ...base,
-    edges: edges.slice(0, 800),
-    symbols: symbols.slice(0, 1500),
-    routes: routes.slice(0, 300),
-    dependencies: [...dependencies].sort(),
-    terms,
-    security: security.filter(
-      (x, i, a) => a.findIndex((y) => y.title === x.title && y.file === x.file) === i,
-    ),
-  };
-}
-
 export default function Home() {
   const [repo, setRepo] = useState<Repo | null>(null),
     [view, setView] = useState<View>("overview"),
@@ -435,7 +116,7 @@ export default function Home() {
             <strong>{repo.name}</strong>
           </div>
           <div>
-            <select defaultValue={repo.branch}>
+            <select defaultValue={repo.branch} aria-label="Active repository branch">
               {(repo.branches?.length ? repo.branches : [repo.branch]).map((b) => (
                 <option key={b}>{b}</option>
               ))}
@@ -503,9 +184,20 @@ function ImportModal({
   onImported: (r: Repo) => void;
 }) {
   return (
-    <div className="dmodal-bg" onMouseDown={onClose}>
-      <div className="dmodal" onMouseDown={(e) => e.stopPropagation()}>
-        <button className="modal-x" onClick={onClose}>
+    <div className="dmodal-bg">
+      <button
+        className="modal-backdrop"
+        type="button"
+        aria-label="Close import dialog"
+        onClick={onClose}
+      />
+      <div className="dmodal">
+        <button
+          className="modal-x"
+          type="button"
+          aria-label="Close import dialog"
+          onClick={onClose}
+        >
           ×
         </button>
         <h2>Analyze another codebase</h2>
@@ -530,7 +222,7 @@ function ImportPanel({ onImported }: { onImported: (r: Repo) => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as AnalyzeRepositoryResponse & { error?: string };
       if (!res.ok) throw new Error(data.error || "Analysis failed");
       onImported({ ...data, source: "remote" });
     } catch (e) {
@@ -541,20 +233,22 @@ function ImportPanel({ onImported }: { onImported: (r: Repo) => void }) {
   async function local(files: File[]) {
     if (!files.length) return;
     setBusy(true);
+    const ignoredPaths = new Set(ignored);
     const all = files.map((f) => ({ f, path: f.webkitRelativePath || f.name })),
-      accepted = all.filter((x) => !x.path.split("/").some((p) => ignored.includes(p)));
+      accepted = all.filter((x) => !x.path.split("/").some((p) => ignoredPaths.has(p)));
     const root = accepted[0]?.path.split("/")[0] || "local-project",
       langs = new Map<string, number>();
     for (const x of accepted) {
-      const e = ext(x.path);
+      const e = extensionOf(x.path);
       langs.set(e, (langs.get(e) || 0) + 1);
     }
     const readable = accepted
       .filter(
         (x) =>
-          codeExt.has(ext(x.path)) || /[.](json|md|ya?ml|toml|sql|graphql|css|html)$/i.test(x.path),
+          x.f.size <= 120000 &&
+          (codeExtensions.has(extensionOf(x.path)) ||
+            /[.](json|md|ya?ml|toml|sql|graphql|css|html)$/i.test(x.path)),
       )
-      .filter((x) => x.f.size <= 120000)
       .slice(0, 200);
     const indexedFiles = await Promise.all(
       readable.map(async (x) => ({ path: x.path, size: x.f.size, content: await x.f.text() })),
@@ -588,9 +282,10 @@ function ImportPanel({ onImported }: { onImported: (r: Repo) => void }) {
         </div>
       ) : (
         <>
-          <label>PUBLIC GIT REPOSITORY</label>
+          <label htmlFor="repository-url">PUBLIC GIT REPOSITORY</label>
           <div className="url-row">
             <input
+              id="repository-url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://github.com/owner/repository"
@@ -617,6 +312,7 @@ function ImportPanel({ onImported }: { onImported: (r: Repo) => void }) {
             <button onClick={() => ref.current?.click()}>Select folder</button>
             <input
               hidden
+              aria-label="Select local repository folder"
               type="file"
               multiple
               ref={(n) => {
@@ -797,7 +493,7 @@ function makeTree(paths: string[]): TreeNode[] {
   return root.children;
 }
 function FileGlyph({ path }: { path: string }) {
-  const e = ext(path);
+  const e = extensionOf(path);
   return (
     <span className={`file-glyph ext-${e}`} aria-hidden="true">
       {e === "tsx" || e === "jsx"
@@ -907,6 +603,7 @@ function Explorer({ repo, model }: { repo: Repo; model: Model }) {
       <div className="tree-toolbar">
         <div>
           <input
+            aria-label="Search repository folders and files"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search folders and files…"
@@ -945,7 +642,7 @@ function Explorer({ repo, model }: { repo: Repo; model: Model }) {
           {selected && (
             <dl>
               <dt>Type</dt>
-              <dd>.{ext(selected)}</dd>
+              <dd>.{extensionOf(selected)}</dd>
               <dt>Folder</dt>
               <dd>{selected.split("/").slice(0, -1).join("/") || "root"}</dd>
               <dt>Classification</dt>
@@ -956,7 +653,7 @@ function Explorer({ repo, model }: { repo: Repo; model: Model }) {
                     ? "Configuration"
                     : model.docs.includes(selected)
                       ? "Documentation"
-                      : codeExt.has(ext(selected))
+                      : codeExtensions.has(extensionOf(selected))
                         ? "Source"
                         : "Asset"}
               </dd>
@@ -1069,7 +766,9 @@ function Architecture({ repo, model }: { repo: Repo; model: Model }) {
             <div className="arch-types">
               {model.extensions
                 .filter((e) =>
-                  repo.sampleFiles.some((p) => p.startsWith(`${d.name}/`) && ext(p) === e.name),
+                  repo.sampleFiles.some(
+                    (p) => p.startsWith(`${d.name}/`) && extensionOf(p) === e.name,
+                  ),
                 )
                 .slice(0, 4)
                 .map((e) => (
@@ -1313,11 +1012,12 @@ function AskRepo({ repo, model }: { repo: Repo; model: Model }) {
         }}
       >
         <input
+          aria-label="Repository question"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Where is authentication handled?"
         />
-        <button>Search evidence</button>
+        <button type="submit">Search evidence</button>
       </form>
       {answer && (
         <section className="dcard answer-real">
@@ -1348,7 +1048,8 @@ function Evolution({ repo, model }: { repo: Repo; model: Model }) {
             <div>
               <b>{c.message}</b>
               <p>
-                {c.author} · {c.date ? new Date(c.date).toLocaleDateString() : "date unavailable"}
+                {c.author} ·{" "}
+                {c.date ? new Date(c.date).toISOString().slice(0, 10) : "date unavailable"}
               </p>
             </div>
           </article>

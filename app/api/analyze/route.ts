@@ -1,3 +1,4 @@
+import type { AnalyzeRepositoryResponse, IndexedFile } from "@/lib/domain/repository";
 import { NextRequest, NextResponse } from "next/server";
 
 const ignored = new Set([
@@ -14,8 +15,7 @@ const ignored = new Set([
   "out",
 ]);
 
-type RemoteFile = { path: string; size?: number; type?: string };
-type IndexedFile = RemoteFile & { content?: string };
+type RemoteFile = Omit<IndexedFile, "content">;
 const textExtensions = new Set([
   "ts",
   "tsx",
@@ -76,10 +76,18 @@ function include(path: string) {
   return !path.split("/").some((part) => ignored.has(part));
 }
 
+function parseAnalyzeRequest(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Request body must be an object.");
+  }
+  const url = (value as Record<string, unknown>).url;
+  if (typeof url !== "string" || !url.trim()) throw new Error("Repository URL is required.");
+  return { url };
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { url } = (await request.json()) as { url?: string };
-    if (!url) throw new Error("Repository URL is required.");
+    const { url } = parseAnalyzeRequest(await request.json());
     const repo = parseRepository(url);
     let branch = "main";
     let description = "";
@@ -241,7 +249,7 @@ export async function POST(request: NextRequest) {
         }
       }),
     );
-    return NextResponse.json({
+    const response: AnalyzeRepositoryResponse = {
       ...repo,
       branch,
       branches: branches.length ? branches : [branch],
@@ -254,9 +262,10 @@ export async function POST(request: NextRequest) {
       languages,
       sampleFiles: accepted.slice(0, 5000).map((file) => file.path),
       indexedFiles,
-      exclusions: ignored,
+      exclusions: [...ignored],
       analyzedAt: new Date().toISOString(),
-    });
+    };
+    return NextResponse.json(response);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Analysis failed." },
