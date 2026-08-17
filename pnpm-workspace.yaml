@@ -25,3 +25,5 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
   workerd: true
+patchedDependencies:
+  typescript@5.9.3: patches/typescript@5.9.3.patch

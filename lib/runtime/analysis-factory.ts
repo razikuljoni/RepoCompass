@@ -32,7 +32,7 @@ export function createAnalysisDependencies(env: AnalysisEnvironment) {
         await env.ANALYSIS_QUEUE.send(message);
       },
     },
-    analyzerVersion: "phase-1a.1",
+    analyzerVersion: "phase-2.1",
     clock: () => new Date(),
     hash,
   };

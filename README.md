@@ -145,7 +145,9 @@ Security findings should originate from deterministic rules or scanners. AI may 
 
 The durable remote path currently supports public GitHub repositories only. It pins every accepted job to an immutable full commit/tree SHA, persists job and snapshot metadata in D1, stores integrity-checked artifacts privately in R2, and performs bounded analysis through idempotent Cloudflare Queue stages. Local folders remain ephemeral and browser-only. Capability tokens protect anonymous status and result access, but they are not user identity or multi-tenant authorization.
 
-Analysis remains regex- and path-derived. The codebase includes a versioned, runtime-validated graph contract with deterministic canonicalization and a compatibility adapter, but the current indexer does not yet populate AST-resolved calls or references. Private-repository authentication, hard parser network isolation, durable graph querying, deep SAST, webhook-based incremental indexing, cancellation, and full multi-snapshot architecture drift remain future milestones.
+Durable remote TypeScript and JavaScript analyses now emit a strict, canonical CodeGraph v2 alongside the compatibility model. The in-memory compiler pipeline extracts declarations, imports and re-exports, calls, inheritance, Express and Next.js routes, test relationships, source evidence, diagnostics, coverage, and graph metrics without executing repository code or consulting the host filesystem. Local-folder analysis remains regex- and path-derived in the browser.
+
+Workspace and package-exports resolution, complete schema extraction, broader language support, durable graph querying, private-repository authorization, hard parser network isolation, deep SAST, webhook-based incremental indexing, cancellation, and full multi-snapshot architecture drift remain future milestones.
 
 See [PRODUCT_PLAN.md](./PRODUCT_PLAN.md) for the staged implementation roadmap.
 
@@ -154,7 +156,7 @@ See [PRODUCT_PLAN.md](./PRODUCT_PLAN.md) for the staged implementation roadmap.
 - Authenticated multi-tenant repository access and retention controls
 - GitHub App authorization for private repositories
 - Queue cancellation, explicit retries, and incremental resumability
-- Language-specific AST parsers and a durable queryable symbol graph
+- Broader language parsers, workspace/package resolution, schemas, and durable graph querying
 - Incremental re-indexing from commits and webhooks
 - Deep SAST, secrets, IaC, license, and supply-chain scanning
 - Pull-request blast-radius analysis and architecture drift

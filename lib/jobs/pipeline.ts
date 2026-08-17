@@ -1,4 +1,5 @@
 import { contentModel } from "../analysis/content-model.ts";
+import { extractTypeScriptCodeGraph } from "../analysis/typescript-code-graph-extractor.ts";
 import {
   analysisResultSchemaVersion,
   parseAnalysisResult,
@@ -419,6 +420,7 @@ async function analyze(
     },
     model: contentModel(repo),
     coverage: snapshot.coverage,
+    graph: extractTypeScriptCodeGraph({ snapshot, files: indexedFiles }),
   });
   const key = artifactKey("result", `${job.id}.json`);
   const artifact = await dependencies.artifactStore.put(key, encodeJson(result));

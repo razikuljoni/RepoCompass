@@ -9,6 +9,7 @@ import { InMemoryAnalysisStore } from "../lib/persistence/analysis-store.ts";
 import { decodeJson, InMemoryArtifactStore } from "../lib/persistence/artifact-store.ts";
 import type { AnalysisQueueMessageV1 } from "../lib/domain/analysis-job.ts";
 import type { GitHubClient } from "../lib/providers/github-client.ts";
+import { parseAnalysisResult } from "../lib/analysis/analysis-result-contract.ts";
 
 const commitSha = "a".repeat(40);
 const treeSha = "b".repeat(40);
@@ -47,7 +48,7 @@ function fixture(fileCount = 11) {
     artifactStore,
     github,
     queue,
-    analyzerVersion: "phase-1a.1",
+    analyzerVersion: "phase-2.1",
     clock,
     hash,
   };
@@ -116,6 +117,85 @@ test("content is fetched in batches of at most ten and stale deliveries are safe
   assert.equal(snapshot?.fileCount, 11);
   assert.equal(snapshot?.totalBytes, 132);
   assert.match(snapshot?.manifestHash ?? "", /^[a-f0-9]{64}$/);
+});
+
+test("successful analysis persists a canonical v2 graph and compatibility model", async () => {
+  const current = fixture(2);
+  const files = new Map([
+    ["src/a.ts", "export function alpha() {}\n"],
+    ["src/b.ts", "import { alpha } from './a';\nexport const beta = alpha();\n"],
+  ]);
+  current.dependencies.github = {
+    ...current.dependencies.github,
+    getTree: async () =>
+      [...files].reverse().map(([path, content], index) => ({
+        path,
+        sha: (index + 1).toString(16).padStart(40, "0"),
+        mode: "100644",
+        size: Buffer.byteLength(content),
+        kind: "blob" as const,
+      })),
+    getBlob: async (_repository, sha) => {
+      const [path, content] = [...files].reverse()[Number.parseInt(sha, 16) - 1];
+      assert.ok(path);
+      return { sha, size: Buffer.byteLength(content), encoding: "utf-8", content };
+    },
+  };
+  const created = await createAnalysis(
+    { repositoryUrl: "https://github.com/owner/repo", ref: "main" },
+    current.dependencies,
+  );
+  await drain(current);
+  const job = await current.analysisStore.getAnalysisJob(created.job.id);
+  const result = parseAnalysisResult(
+    decodeJson((await current.artifactStore.get(job!.resultKey!))!),
+  );
+  assert.equal(result.analyzerVersion, "phase-2.1");
+  assert.equal(result.graph?.schemaVersion, "2.0");
+  assert.deepStrictEqual(result.graph?.snapshot, result.snapshot);
+  assert.deepStrictEqual(result.model.sourceFiles, ["src/a.ts", "src/b.ts"]);
+  assert.deepStrictEqual(
+    result.graph?.nodes
+      .filter((node) => node.kind === "file")
+      .map((node) => ({ name: node.name, path: node.location?.path })),
+    [
+      { name: "a.ts", path: "src/a.ts" },
+      { name: "b.ts", path: "src/b.ts" },
+    ],
+  );
+  assert.deepStrictEqual(
+    result.graph?.nodes
+      .filter((node) => node.kind === "symbol")
+      .map((node) => ({ name: node.name, evidence: node.location })),
+    [
+      {
+        name: "alpha",
+        evidence: {
+          path: "src/a.ts",
+          startLine: 1,
+          startColumn: 1,
+          endLine: 1,
+          endColumn: 27,
+        },
+      },
+      {
+        name: "beta",
+        evidence: {
+          path: "src/b.ts",
+          startLine: 2,
+          startColumn: 14,
+          endLine: 2,
+          endColumn: 28,
+        },
+      },
+    ],
+  );
+  const artifact = await current.artifactStore.get(job!.resultKey!);
+  await processAnalysisMessage(
+    { schemaVersion: "1", jobId: created.job.id, expectedStage: "analyze" },
+    current.dependencies,
+  );
+  assert.deepStrictEqual(await current.artifactStore.get(job!.resultKey!), artifact);
 });
 
 test("persisted stage repairs continuation after enqueue failure", async () => {
