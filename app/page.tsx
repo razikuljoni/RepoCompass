@@ -2,8 +2,18 @@
 import { useMemo, useRef, useState } from "react";
 import { contentModel } from "@/lib/analysis/content-model";
 import { codeExtensions, extensionOf } from "@/lib/analysis/file-classification";
-import type { AnalyzeRepositoryResponse, Repo } from "@/lib/domain/repository";
+import type { AnalysisResult } from "@/lib/analysis/analysis-result-contract";
+import type { Repo } from "@/lib/domain/repository";
 import type { Model } from "@/lib/domain/repository-model";
+import type {
+  AnalysisResultResponse,
+  AnalysisStatusResponse,
+  CreateAnalysisResponse,
+} from "@/lib/runtime/analysis-service";
+
+type ImportedRepository = { repo: Repo; model?: Model };
+type ApiErrorResponse = { error: { code: string; message: string } };
+type BusyStatus = Pick<AnalysisStatusResponse, "status" | "stage" | "progress">;
 
 type View =
   | "overview"
@@ -55,18 +65,19 @@ function bytes(value: number) {
 }
 export default function Home() {
   const [repo, setRepo] = useState<Repo | null>(null),
+    [serverModel, setServerModel] = useState<Model | null>(null),
     [view, setView] = useState<View>("overview"),
     [importing, setImporting] = useState(false);
-  const model = useMemo(() => (repo ? contentModel(repo) : null), [repo]);
-  if (!repo || !model)
-    return (
-      <EmptyState
-        onImported={(data) => {
-          setRepo(data);
-          setView("overview");
-        }}
-      />
-    );
+  const model = useMemo(
+    () => (repo ? serverModel || contentModel(repo) : null),
+    [repo, serverModel],
+  );
+  function importRepository(data: ImportedRepository) {
+    setRepo(data.repo);
+    setServerModel(data.model || null);
+    setView("overview");
+  }
+  if (!repo || !model) return <EmptyState onImported={importRepository} />;
   return (
     <main className="dynamic-app">
       <aside className="dynamic-sidebar">
@@ -74,7 +85,7 @@ export default function Home() {
           <span>RC</span>
           <b>RepoCompass</b>
         </div>
-        <button className="current-repo" onClick={() => setImporting(true)}>
+        <button type="button" className="current-repo" onClick={() => setImporting(true)}>
           <i>{repo.name[0]?.toUpperCase()}</i>
           <div>
             <b>
@@ -89,6 +100,7 @@ export default function Home() {
         <nav>
           {nav.map((n) => (
             <button
+              type="button"
               key={n.id}
               onClick={() => setView(n.id)}
               className={view === n.id ? "active" : ""}
@@ -102,7 +114,9 @@ export default function Home() {
           ))}
         </nav>
         <div className="index-status">
-          <span>● Index ready</span>
+          <span>
+            ● {repo.source === "remote" ? "Immutable snapshot ready" : "Ephemeral working tree"}
+          </span>
           <small>
             {repo.ignored} paths ignored · {bytes(repo.bytes)}
           </small>
@@ -116,12 +130,22 @@ export default function Home() {
             <strong>{repo.name}</strong>
           </div>
           <div>
-            <select defaultValue={repo.branch} aria-label="Active repository branch">
+            <select
+              defaultValue={repo.branch}
+              disabled
+              aria-label={
+                repo.source === "remote"
+                  ? "Pinned repository reference; import again to analyze another ref"
+                  : "Ephemeral local working tree reference"
+              }
+            >
               {(repo.branches?.length ? repo.branches : [repo.branch]).map((b) => (
                 <option key={b}>{b}</option>
               ))}
             </select>
-            <button onClick={() => setImporting(true)}>＋ Import another</button>
+            <button type="button" onClick={() => setImporting(true)}>
+              ＋ Import another
+            </button>
           </div>
         </header>
         <div className="dynamic-content">
@@ -146,9 +170,8 @@ export default function Home() {
         <ImportModal
           onClose={() => setImporting(false)}
           onImported={(data) => {
-            setRepo(data);
+            importRepository(data);
             setImporting(false);
-            setView("overview");
           }}
         />
       )}
@@ -156,7 +179,7 @@ export default function Home() {
   );
 }
 
-function EmptyState({ onImported }: { onImported: (r: Repo) => void }) {
+function EmptyState({ onImported }: { onImported: (data: ImportedRepository) => void }) {
   return (
     <main className="empty-state">
       <div className="empty-brand">
@@ -181,7 +204,7 @@ function ImportModal({
   onImported,
 }: {
   onClose: () => void;
-  onImported: (r: Repo) => void;
+  onImported: (data: ImportedRepository) => void;
 }) {
   return (
     <div className="dmodal-bg">
@@ -206,33 +229,88 @@ function ImportModal({
     </div>
   );
 }
-function ImportPanel({ onImported }: { onImported: (r: Repo) => void }) {
+const stageMessages: Record<AnalysisStatusResponse["stage"], string> = {
+  inventory: "Discovering repository files",
+  "fetch-content": "Fetching eligible source content",
+  analyze: "Building the repository model",
+  complete: "Finalizing the immutable snapshot",
+};
+
+function apiError(data: unknown, fallback: string) {
+  const response = data as Partial<ApiErrorResponse>;
+  return response.error?.message || fallback;
+}
+
+async function responseJson(response: Response) {
+  try {
+    return (await response.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function ImportPanel({ onImported }: { onImported: (data: ImportedRepository) => void }) {
   const [url, setUrl] = useState(""),
-    [busy, setBusy] = useState(false),
+    [busy, setBusy] = useState<"remote" | "local" | null>(null),
+    [busyStatus, setBusyStatus] = useState<BusyStatus | null>(null),
     [error, setError] = useState(""),
     [drag, setDrag] = useState(false);
   const ref = useRef<HTMLInputElement | null>(null);
   async function remote() {
-    if (!url.trim()) return setError("Paste a public repository URL.");
-    setBusy(true);
+    if (!url.trim()) return setError("Paste a public GitHub repository URL.");
+    setBusy("remote");
+    setBusyStatus(null);
     setError("");
     try {
-      const res = await fetch("/api/analyze", {
+      const createResponse = await fetch("/api/analyses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ repositoryUrl: url.trim() }),
       });
-      const data = (await res.json()) as AnalyzeRepositoryResponse & { error?: string };
-      if (!res.ok) throw new Error(data.error || "Analysis failed");
-      onImported({ ...data, source: "remote" });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Analysis failed");
-      setBusy(false);
+      const createData = await responseJson(createResponse);
+      if (!createResponse.ok)
+        throw new Error(apiError(createData, "Analysis could not be started."));
+      const created = createData as CreateAnalysisResponse;
+      const authorization = { Authorization: `Bearer ${created.capabilityToken}` };
+      let status: AnalysisStatusResponse = created;
+      setBusyStatus(status);
+      for (let attempt = 0; status.status === "queued" || status.status === "running"; attempt++) {
+        if (attempt >= 120) throw new Error("Analysis timed out. Try again later.");
+        await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * 1.5 ** attempt, 5000)));
+        const statusResponse = await fetch(
+          `/api/analyses/${encodeURIComponent(created.analysisId)}`,
+          {
+            headers: authorization,
+          },
+        );
+        const statusData = await responseJson(statusResponse);
+        if (!statusResponse.ok)
+          throw new Error(apiError(statusData, "Analysis status is unavailable."));
+        status = statusData as AnalysisStatusResponse;
+        setBusyStatus(status);
+      }
+      if (status.status === "failed" || status.status === "cancelled") {
+        throw new Error(status.error?.message || "Analysis did not complete.");
+      }
+      const resultResponse = await fetch(
+        `/api/analyses/${encodeURIComponent(created.analysisId)}/result`,
+        { headers: authorization },
+      );
+      const resultData = await responseJson(resultResponse);
+      if (!resultResponse.ok)
+        throw new Error(apiError(resultData, "Analysis result is unavailable."));
+      const { result } = resultData as AnalysisResultResponse;
+      onImported(remotePayload(result));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Analysis failed.");
+      setBusy(null);
+      setBusyStatus(null);
     }
   }
   async function local(files: File[]) {
     if (!files.length) return;
-    setBusy(true);
+    setBusy("local");
+    setError("");
     const ignoredPaths = new Set(ignored);
     const all = files.map((f) => ({ f, path: f.webkitRelativePath || f.name })),
       accepted = all.filter((x) => !x.path.split("/").some((p) => ignoredPaths.has(p)));
@@ -254,78 +332,103 @@ function ImportPanel({ onImported }: { onImported: (r: Repo) => void }) {
       readable.map(async (x) => ({ path: x.path, size: x.f.size, content: await x.f.text() })),
     );
     onImported({
-      owner: "local",
-      name: root,
-      provider: "Local folder",
-      branch: "working-tree",
-      branches: ["working-tree"],
-      files: accepted.length,
-      ignored: all.length - accepted.length,
-      bytes: accepted.reduce((s, x) => s + x.f.size, 0),
-      languages: [...langs.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, count]) => ({ name, count })),
-      sampleFiles: accepted.map((x) => x.path),
-      indexedFiles,
-      source: "local",
+      repo: {
+        owner: "local",
+        name: root,
+        provider: "Local folder",
+        branch: "working-tree",
+        branches: ["working-tree"],
+        files: accepted.length,
+        ignored: all.length - accepted.length,
+        bytes: accepted.reduce((sum, x) => sum + x.f.size, 0),
+        languages: [...langs.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([name, count]) => ({ name, count })),
+        sampleFiles: accepted.map((x) => x.path),
+        indexedFiles,
+        source: "local",
+      },
     });
   }
+  const progress = busyStatus?.progress;
   return (
     <div className="import-panel">
       {busy ? (
-        <div className="real-indexing">
+        <div className="real-indexing" aria-live="polite">
           <i />
-          <h3>Building repository model…</h3>
+          <h3>
+            {busy === "local"
+              ? "Reading ephemeral local working tree"
+              : busyStatus
+                ? stageMessages[busyStatus.stage]
+                : "Starting durable GitHub analysis"}
+            …
+          </h3>
           <p>
-            Reading source, imports, symbols, routes, configuration, tests and security signals.
+            {busy === "local"
+              ? "Files stay in this browser session and are not stored."
+              : "The remote analysis is durable and pinned to an immutable commit."}
           </p>
+          {progress && (
+            <strong>
+              {progress.totalUnits
+                ? `${progress.completedUnits.toLocaleString()} of ${progress.totalUnits.toLocaleString()}`
+                : `${progress.completedUnits.toLocaleString()} completed`}
+            </strong>
+          )}
         </div>
       ) : (
         <>
-          <label htmlFor="repository-url">PUBLIC GIT REPOSITORY</label>
+          <label htmlFor="repository-url">PUBLIC GITHUB REPOSITORY</label>
           <div className="url-row">
             <input
               id="repository-url"
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(event) => setUrl(event.target.value)}
               placeholder="https://github.com/owner/repository"
             />
-            <button onClick={remote}>Analyze URL</button>
+            <button type="button" onClick={() => void remote()}>
+              Analyze URL
+            </button>
           </div>
-          <small>GitHub, GitLab and Bitbucket public repositories</small>
+          <small>
+            Public GitHub repositories are analyzed as durable, commit-pinned snapshots.
+          </small>
           <div className="or">
-            <span>or use local files</span>
+            <span>or use ephemeral local files</span>
           </div>
           <div
             className={`real-drop ${drag ? "dragging" : ""}`}
-            onDragOver={(e) => e.preventDefault()}
+            onDragOver={(event) => event.preventDefault()}
             onDragEnter={() => setDrag(true)}
             onDragLeave={() => setDrag(false)}
-            onDrop={(e) => {
-              e.preventDefault();
+            onDrop={(event) => {
+              event.preventDefault();
               setDrag(false);
-              void local(Array.from(e.dataTransfer.files));
+              void local(Array.from(event.dataTransfer.files));
             }}
           >
             <b>Drop a project folder here</b>
-            <p>or open the system file manager</p>
-            <button onClick={() => ref.current?.click()}>Select folder</button>
+            <p>Browser-only and ephemeral; local files are not uploaded.</p>
+            <button type="button" onClick={() => ref.current?.click()}>
+              Select folder
+            </button>
             <input
               hidden
               aria-label="Select local repository folder"
               type="file"
               multiple
-              ref={(n) => {
-                ref.current = n;
-                if (n) n.setAttribute("webkitdirectory", "");
+              ref={(node) => {
+                ref.current = node;
+                if (node) node.setAttribute("webkitdirectory", "");
               }}
-              onChange={(e) => void local(Array.from(e.target.files || []))}
+              onChange={(event) => void local(Array.from(event.target.files || []))}
             />
           </div>
           <div className="ignore-preview">
             <b>Ignored:</b>
-            {ignored.map((x) => (
-              <code key={x}>{x}</code>
+            {ignored.map((path) => (
+              <code key={path}>{path}</code>
             ))}
           </div>
           {error && <p className="real-error">{error}</p>}
@@ -333,6 +436,29 @@ function ImportPanel({ onImported }: { onImported: (r: Repo) => void }) {
       )}
     </div>
   );
+}
+
+function remotePayload(result: AnalysisResult): ImportedRepository {
+  const { repository, snapshot, model, coverage } = result;
+  return {
+    repo: {
+      owner: repository.owner,
+      name: repository.name,
+      provider: "GitHub",
+      branch: snapshot.requestedRef,
+      branches: [snapshot.requestedRef],
+      files: coverage.discoveredFiles,
+      ignored: coverage.skippedFiles,
+      bytes: coverage.discoveredBytes,
+      languages: model.extensions,
+      sampleFiles: snapshot.manifest.reduce<string[]>((paths, entry) => {
+        if (entry.kind === "blob") paths.push(entry.path);
+        return paths;
+      }, []),
+      source: "remote",
+    },
+    model,
+  };
 }
 
 function Title({ k, title, sub }: { k: string; title: string; sub: string }) {
@@ -1109,44 +1235,48 @@ function Glossary({ repo, model }: { repo: Repo; model: Model }) {
   );
 }
 
+const connections = [
+  {
+    name: "GitHub",
+    detail: "Durable, commit-pinned analysis for public repositories",
+    supported: true,
+  },
+  {
+    name: "Local folder",
+    detail: "Private, browser-only analysis of an ephemeral working tree",
+    supported: true,
+  },
+  { name: "GitLab", detail: "Durable ingestion is planned", supported: false },
+  { name: "Bitbucket", detail: "Durable ingestion is planned", supported: false },
+  { name: "Azure DevOps", detail: "Provider support is planned", supported: false },
+  { name: "VS Code", detail: "Editor integration is planned", supported: false },
+  { name: "Cursor / MCP", detail: "Assistant integration is planned", supported: false },
+] as const;
+
 function Integrations({ repo, onImport }: { repo: Repo; onImport: () => void }) {
   return (
     <>
       <Title
         k="INTEGRATIONS"
         title="Source and editor connections"
-        sub={`The active ${repo.provider} repository is analyzed. Other connections stay available without pretending to be configured.`}
+        sub={`The active ${repo.provider} source is analyzed. Planned connections are labelled explicitly.`}
       />
       <div className="integration-real">
-        {[
-          repo.provider,
-          "GitHub",
-          "GitLab",
-          "Bitbucket",
-          "Azure DevOps",
-          "Local folder",
-          "VS Code",
-          "Cursor / MCP",
-        ]
-          .filter((x, i, a) => a.indexOf(x) === i)
-          .map((x) => (
-            <article key={x}>
-              <span>{x.slice(0, 2).toUpperCase()}</span>
+        {connections.map((connection) => {
+          const active = connection.name === repo.provider;
+          return (
+            <article key={connection.name}>
+              <span>{connection.name.slice(0, 2).toUpperCase()}</span>
               <div>
-                <b>{x}</b>
-                <p>
-                  {x === repo.provider
-                    ? "Active source for this analysis"
-                    : x.includes("VS") || x.includes("Cursor")
-                      ? "Configuration available after backend deployment"
-                      : "Import or connect another codebase"}
-                </p>
+                <b>{connection.name}</b>
+                <p>{active ? "Active source for this analysis" : connection.detail}</p>
               </div>
-              <em>{x === repo.provider ? "Active" : "Available"}</em>
+              <em>{active ? "Active" : connection.supported ? "Supported" : "Planned"}</em>
             </article>
-          ))}
+          );
+        })}
       </div>
-      <button className="integration-import" onClick={onImport}>
+      <button type="button" className="integration-import" onClick={onImport}>
         ＋ Import another repository
       </button>
     </>

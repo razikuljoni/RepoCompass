@@ -8,8 +8,8 @@ import {
   type GraphEvidence,
   type GraphLocation,
   type GraphNode,
-  type GraphSnapshot,
 } from "../domain/code-graph.ts";
+import { parseRepositorySnapshot } from "../domain/repository-snapshot.ts";
 
 function record(value: unknown, path: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -109,15 +109,6 @@ function edge(value: unknown, path: string): GraphEdge {
   return result;
 }
 
-function snapshot(value: unknown): GraphSnapshot {
-  const input = record(value, "snapshot");
-  return {
-    repositoryId: string(input.repositoryId, "snapshot.repositoryId"),
-    commitSha: string(input.commitSha, "snapshot.commitSha"),
-    ref: string(input.ref, "snapshot.ref"),
-  };
-}
-
 export function parseCodeGraph(value: unknown): CodeGraph {
   const input = record(value, "graph");
   if (input.schemaVersion !== graphSchemaVersion) {
@@ -127,7 +118,7 @@ export function parseCodeGraph(value: unknown): CodeGraph {
   if (!Array.isArray(input.edges)) throw new TypeError("graph.edges must be an array");
   const graph: CodeGraph = {
     schemaVersion: graphSchemaVersion,
-    snapshot: snapshot(input.snapshot),
+    snapshot: parseRepositorySnapshot(input.snapshot),
     nodes: input.nodes.map((item, index) => node(item, `nodes[${index}]`)),
     edges: input.edges.map((item, index) => edge(item, `edges[${index}]`)),
   };

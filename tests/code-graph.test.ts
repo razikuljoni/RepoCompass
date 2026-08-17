@@ -3,13 +3,27 @@ import test from "node:test";
 import { canonicalizeCodeGraph } from "../lib/analysis/canonicalize-code-graph.ts";
 import { parseCodeGraph } from "../lib/analysis/code-graph-contract.ts";
 import type { CodeGraph } from "../lib/domain/code-graph.ts";
+import { repositorySnapshotLimits } from "../lib/domain/repository-snapshot.ts";
 
 const graph: CodeGraph = {
   schemaVersion: "1.0",
   snapshot: {
+    snapshotId: "snapshot-1",
+    provider: "github",
     repositoryId: "github:example/project",
-    commitSha: "0123456789abcdef",
-    ref: "refs/heads/main",
+    requestedRef: "main",
+    commitSha: "0123456789abcdef0123456789abcdef01234567",
+    treeSha: "abcdef0123456789abcdef0123456789abcdef01",
+    manifest: [],
+    limits: repositorySnapshotLimits,
+    coverage: {
+      discoveredFiles: 0,
+      analyzedFiles: 0,
+      skippedFiles: 0,
+      discoveredBytes: 0,
+      analyzedBytes: 0,
+      truncated: false,
+    },
   },
   nodes: [
     {
@@ -72,10 +86,18 @@ test("canonicalizes paths, ordering, duplicate edges, and evidence", () => {
   });
 });
 
-test("rejects unsupported versions and dangling edges", () => {
+test("rejects unsupported versions, non-canonical commits, and dangling edges", () => {
   assert.throws(
     () => parseCodeGraph({ ...graph, schemaVersion: "2.0" }),
     /graph\.schemaVersion must be "1\.0"/,
+  );
+  assert.throws(
+    () =>
+      parseCodeGraph({
+        ...graph,
+        snapshot: { ...graph.snapshot, commitSha: "0123456789abcdef" },
+      }),
+    /snapshot\.commitSha must be a lowercase 40-character hexadecimal GitHub object SHA/,
   );
   assert.throws(
     () =>

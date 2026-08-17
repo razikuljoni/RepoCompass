@@ -1,3 +1,5 @@
+import type { RepositorySnapshot } from "./repository-snapshot.ts";
+
 export const graphSchemaVersion = "1.0" as const;
 
 export const graphNodeKinds = ["file", "symbol", "package", "route", "document"] as const;
@@ -47,11 +49,7 @@ export type GraphEdge = {
   evidence: GraphEvidence[];
 };
 
-export type GraphSnapshot = {
-  repositoryId: string;
-  commitSha: string;
-  ref: string;
-};
+export type GraphSnapshot = RepositorySnapshot;
 
 export type CodeGraph = {
   schemaVersion: typeof graphSchemaVersion;

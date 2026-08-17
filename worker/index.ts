@@ -1,32 +1,16 @@
-/** Cloudflare Worker entry point for the vinext-starter template. */
 import {
   handleImageOptimization,
   DEFAULT_DEVICE_SIZES,
   DEFAULT_IMAGE_SIZES,
 } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { analysisQueueRuntime } from "../lib/runtime/analysis-queue.ts";
 
-interface Env {
-  ASSETS: { fetch(request: Request): Promise<Response> };
-  IMAGES: {
-    input(stream: ReadableStream): {
-      transform(options: Record<string, unknown>): {
-        output(options: { format: string; quality: number }): Promise<{ response(): Response }>;
-      };
-    };
-  };
-}
-
-interface ExecutionContext {
-  waitUntil(promise: Promise<unknown>): void;
-  passThroughOnException(): void;
-}
-
-const worker = {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+const worker: ExportedHandler<Cloudflare.Env> = {
+  async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/_vinext/image") {
+    if (url.pathname === "/_vinext/image" && env.ASSETS && env.IMAGES) {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(
         request,
@@ -35,7 +19,7 @@ const worker = {
           transformImage: async (body, { width, format, quality }) => {
             const result = await env.IMAGES.input(body)
               .transform(width > 0 ? { width } : {})
-              .output({ format, quality });
+              .output({ format: format as "image/avif" | "image/webp", quality });
             return result.response();
           },
         },
@@ -44,6 +28,9 @@ const worker = {
     }
 
     return handler.fetch(request, env, ctx);
+  },
+  async queue(batch, env): Promise<void> {
+    await analysisQueueRuntime.consume(batch, env);
   },
 };
 

@@ -10,9 +10,9 @@ The core rule is simple: explanations must point back to real repository evidenc
 
 ## Features
 
-- Import public GitHub, GitLab, and Bitbucket repository URLs
-- Select a local folder through the operating-system file picker
-- Drag and drop local project folders for browser-side indexing
+- Import public GitHub repositories into durable, commit-pinned analysis jobs
+- Resume queued analysis status and load integrity-checked results through capability-protected APIs
+- Select or drag a local project folder for private, browser-only working-tree analysis
 - Automatically exclude heavy/generated paths such as `node_modules`, `.git`, `.next`, `dist`, `build`, `coverage`, `.turbo`, `.cache`, `vendor`, `target`, and `out`
 - Repository-driven overview metrics, language distribution, branches, and commits
 - Expandable code explorer with folder/file icons and recursive file totals
@@ -48,9 +48,9 @@ Every workspace reads from the same active repository model. Changing the select
 - React 19 and Next.js-compatible Vinext runtime
 - TypeScript
 - Vite
-- Cloudflare Workers-compatible deployment
+- Cloudflare Workers, Queues, D1, and private R2 artifact storage
 - Tailwind CSS toolchain and custom responsive styles
-- Provider APIs and browser File System APIs for repository ingestion
+- GitHub APIs and browser File System APIs for repository ingestion
 
 ## Getting started
 
@@ -86,11 +86,48 @@ pnpm test               # Run unit and rendered-artifact tests
 pnpm validate:artifact  # Validate an existing build artifact
 ```
 
+### Cloudflare deployment
+
+The durable GitHub path runs as one Cloudflare Worker backed by D1, a private R2 bucket, an analysis Queue, and a dead-letter Queue. Provision the resources referenced by `wrangler.jsonc`:
+
+```bash
+pnpm exec wrangler login
+pnpm exec wrangler d1 create repo-compass-production
+pnpm exec wrangler r2 bucket create repo-compass-artifacts-production
+pnpm exec wrangler queues create repo-compass-analysis-production
+pnpm exec wrangler queues create repo-compass-analysis-dlq-production
+```
+
+Replace the placeholder D1 ID and custom domain in `wrangler.jsonc`. Store production secrets outside source control:
+
+```bash
+pnpm exec wrangler secret put CAPABILITY_SECRET
+pnpm exec wrangler secret put GITHUB_TOKEN
+```
+
+`GITHUB_TOKEN` is optional for public repositories but increases GitHub API capacity. For local development, put `CAPABILITY_SECRET` and an optional `GITHUB_TOKEN` in an ignored `.dev.vars` file. Generate binding types, migrate D1, and deploy:
+
+```bash
+pnpm cf:types
+pnpm db:migrate
+pnpm deploy
+```
+
+Use `pnpm db:migrate:local` for local D1 migrations. Source blobs use the `blob/` R2 prefix and must expire after seven days:
+
+```bash
+pnpm exec wrangler r2 bucket lifecycle add repo-compass-artifacts-production expire-source-blobs blob/ --expire-days 7 --force
+```
+
+Manifests and compact analysis results use separate prefixes and are not covered by that source-retention rule.
+
 ## Repository ingestion
 
-Public repository URLs use provider APIs where available. Local folders are processed in the browser and are not uploaded by the current prototype. Private-provider access requires OAuth applications and secure token storage before production use.
+Public GitHub URLs are resolved to a full commit and tree SHA before a job is accepted. Inventory, bounded source retrieval, and deterministic analysis run through idempotent Queue stages; metadata survives restarts in D1, while hashed manifests, source blobs, and results remain private in R2. Status and result APIs require an unguessable capability derived with `CAPABILITY_SECRET`.
 
-The indexer intentionally limits oversized repositories and skips generated, binary, vendored, and dependency content. These boundaries keep the browser responsive and prevent a fashionable dashboard from turning into a space heater.
+Local folders stay in the browser, are never uploaded, and are labelled as ephemeral working trees rather than immutable snapshots. Private GitHub access requires a future authenticated installation flow and repository authorization checks.
+
+The durable indexer caps inventory at 10,000 entries, analyzes at most 100 files, accepts at most 120,000 decoded bytes per file and 10,000,000 decoded bytes per snapshot, and fetches no more than 10 content files per Queue stage. It skips generated, binary, oversized, symlink, submodule, vendored, and dependency content and reports coverage explicitly.
 
 ## Reliability model
 
@@ -106,16 +143,18 @@ Security findings should originate from deterministic rules or scanners. AI may 
 
 ## Current scope
 
-The deployed version performs real provider/local ingestion and regex- and path-derived analysis within safe browser limits. The codebase now includes a versioned, runtime-validated graph contract with deterministic canonicalization and an adapter that preserves the current workspace model. The current indexer does not yet populate that richer contract with AST-resolved calls or references. Production-scale exhaustive AST analysis, graph persistence and querying, deep SAST, private-repository OAuth, background jobs, webhook-based incremental indexing, and full multi-snapshot architecture drift remain backend milestones.
+The durable remote path currently supports public GitHub repositories only. It pins every accepted job to an immutable full commit/tree SHA, persists job and snapshot metadata in D1, stores integrity-checked artifacts privately in R2, and performs bounded analysis through idempotent Cloudflare Queue stages. Local folders remain ephemeral and browser-only. Capability tokens protect anonymous status and result access, but they are not user identity or multi-tenant authorization.
+
+Analysis remains regex- and path-derived. The codebase includes a versioned, runtime-validated graph contract with deterministic canonicalization and a compatibility adapter, but the current indexer does not yet populate AST-resolved calls or references. Private-repository authentication, hard parser network isolation, durable graph querying, deep SAST, webhook-based incremental indexing, cancellation, and full multi-snapshot architecture drift remain future milestones.
 
 See [PRODUCT_PLAN.md](./PRODUCT_PLAN.md) for the staged implementation roadmap.
 
 ## Roadmap highlights
 
-- Persistent multi-tenant repository and analysis storage
-- Provider OAuth for private repositories
-- Queue-based workers with cancellation and resumable indexing
-- Language-specific AST parsers and a durable symbol graph
+- Authenticated multi-tenant repository access and retention controls
+- GitHub App authorization for private repositories
+- Queue cancellation, explicit retries, and incremental resumability
+- Language-specific AST parsers and a durable queryable symbol graph
 - Incremental re-indexing from commits and webhooks
 - Deep SAST, secrets, IaC, license, and supply-chain scanning
 - Pull-request blast-radius analysis and architecture drift
