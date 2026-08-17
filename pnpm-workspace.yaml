@@ -1,0 +1,27 @@
+minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  - '@napi-rs/wasm-runtime@1.2.3'
+  - '@typescript-eslint/eslint-plugin@8.67.0'
+  - '@typescript-eslint/parser@8.67.0'
+  - '@typescript-eslint/project-service@8.67.0'
+  - '@typescript-eslint/scope-manager@8.67.0'
+  - '@typescript-eslint/tsconfig-utils@8.67.0'
+  - '@typescript-eslint/type-utils@8.67.0'
+  - '@typescript-eslint/types@8.67.0'
+  - '@typescript-eslint/typescript-estree@8.67.0'
+  - '@typescript-eslint/utils@8.67.0'
+  - '@typescript-eslint/visitor-keys@8.67.0'
+  - baseline-browser-mapping@2.11.14
+  - electron-to-chromium@1.5.407
+  - get-tsconfig@4.14.2
+  - typescript-eslint@8.67.0
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  - eslint-import-resolver-typescript@3.10.1
+  - semver@6.3.1
+  - undici-types@6.21.0
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+  workerd: true

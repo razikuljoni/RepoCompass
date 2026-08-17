@@ -50,7 +50,6 @@ Every workspace reads from the same active repository model. Changing the select
 - Vite
 - Cloudflare Workers-compatible deployment
 - Tailwind CSS toolchain and custom responsive styles
-- Optional Cloudflare D1 with Drizzle ORM
 - Provider APIs and browser File System APIs for repository ingestion
 
 ## Getting started
@@ -58,14 +57,14 @@ Every workspace reads from the same active repository model. Changing the select
 ### Requirements
 
 - Node.js 22.13 or newer
-- npm
+- pnpm
 - Linux for the deployment helper scripts (`flock` and GNU `timeout`)
 
 ### Install and run
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Open the local URL printed by Vite.
@@ -73,11 +72,11 @@ Open the local URL printed by Vite.
 ### Useful commands
 
 ```bash
-npm run dev                # Start the development server
-npm run lint               # Run ESLint
-npm run build              # Create and validate the production artifact
-npm test                   # Build and run rendered-output tests
-npm run validate:artifact  # Validate an existing build artifact
+pnpm dev                # Start the development server
+pnpm lint               # Run ESLint
+pnpm build              # Create and validate the production artifact
+pnpm test               # Build and run rendered-output tests
+pnpm validate:artifact  # Validate an existing build artifact
 ```
 
 ## Repository ingestion
@@ -123,7 +122,7 @@ Issues and pull requests are welcome. For meaningful changes:
 1. Create a focused branch.
 2. Keep repository-derived results evidence-backed.
 3. Add or update tests for analysis behavior.
-4. Run `npm run lint` and `npm test` before opening a pull request.
+4. Run `pnpm lint` and `pnpm test` before opening a pull request.
 5. Document any new capability boundary or provider requirement.
 
 ## Security

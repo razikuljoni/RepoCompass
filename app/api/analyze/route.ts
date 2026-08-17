@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const ignored = ["node_modules", ".git", ".next", "dist", "build", "coverage", ".turbo", ".cache", "vendor", "target", "out"];
+const ignored = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage", ".turbo", ".cache", "vendor", "target", "out"]);
 
 type RemoteFile = { path: string; size?: number; type?: string };
 type IndexedFile = RemoteFile & { content?: string };
@@ -15,7 +15,7 @@ function parseRepository(raw: string) {
   throw new Error("Use a public GitHub, GitLab, or Bitbucket repository URL.");
 }
 
-function include(path: string) { return !path.split("/").some((part) => ignored.includes(part)); }
+function include(path: string) { return !path.split("/").some((part) => ignored.has(part)); }
 
 export async function POST(request: NextRequest) {
   try {
@@ -43,7 +43,10 @@ export async function POST(request: NextRequest) {
       const treeResponse = await fetch(`https://api.github.com/repos/${repo.key}/git/trees/${encodeURIComponent(branch)}?recursive=1`, { headers: { Accept: "application/vnd.github+json", "User-Agent": "RepoCompass" } });
       if (!treeResponse.ok) throw new Error("Could not read the repository tree.");
       const tree = await treeResponse.json() as { tree: Array<{ path: string; type: string; size?: number }>; truncated?: boolean };
-      files = tree.tree.filter((item) => item.type === "blob").map((item) => ({ path: item.path, size: item.size, type: item.type }));
+      files = tree.tree.reduce<RemoteFile[]>((result, item) => {
+        if (item.type === "blob") result.push({ path: item.path, size: item.size, type: item.type });
+        return result;
+      }, []);
     } else if (repo.provider === "GitLab") {
       const projectId = encodeURIComponent(repo.key);
       const infoResponse = await fetch(`https://gitlab.com/api/v4/projects/${projectId}`);
@@ -66,7 +69,10 @@ export async function POST(request: NextRequest) {
       const treeResponse = await fetch(`https://api.bitbucket.org/2.0/repositories/${repo.key}/src/${encodeURIComponent(branch)}/?pagelen=100&max_depth=10`);
       if (!treeResponse.ok) throw new Error("Could not read the repository tree.");
       const tree = await treeResponse.json() as { values: Array<{ path: string; type: string; size?: number }> };
-      files = tree.values.filter((item) => item.type === "commit_file").map((item) => ({ path: item.path, size: item.size }));
+      files = tree.values.reduce<RemoteFile[]>((result, item) => {
+        if (item.type === "commit_file") result.push({ path: item.path, size: item.size });
+        return result;
+      }, []);
     }
 
     const accepted = files.filter((file) => include(file.path));
