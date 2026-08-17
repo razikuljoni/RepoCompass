@@ -73,7 +73,12 @@ Open the local URL printed by Vite.
 
 ```bash
 pnpm dev                # Start the development server
-pnpm lint               # Run ESLint
+pnpm lint               # Run ESLint with zero warnings
+pnpm lint:fix           # Fix automatically resolvable lint issues
+pnpm format             # Format supported files with Prettier
+pnpm format:check       # Check formatting without changing files
+pnpm typecheck          # Run the TypeScript compiler
+pnpm check              # Run formatting, linting, and type checks
 pnpm build              # Create and validate the production artifact
 pnpm test               # Build and run rendered-output tests
 pnpm validate:artifact  # Validate an existing build artifact
@@ -89,10 +94,10 @@ The indexer intentionally limits oversized repositories and skips generated, bin
 
 RepoCompass separates three kinds of output:
 
-| Label | Meaning |
-| --- | --- |
-| Verified | Directly supported by indexed code or provider data |
-| Inferred | A reasoned explanation derived from cited evidence |
+| Label       | Meaning                                                          |
+| ----------- | ---------------------------------------------------------------- |
+| Verified    | Directly supported by indexed code or provider data              |
+| Inferred    | A reasoned explanation derived from cited evidence               |
 | Unavailable | Requires evidence or analysis the current index does not contain |
 
 Security findings should originate from deterministic rules or scanners. AI may explain a finding and suggest remediation, but it must not invent the underlying vulnerability.
@@ -122,7 +127,7 @@ Issues and pull requests are welcome. For meaningful changes:
 1. Create a focused branch.
 2. Keep repository-derived results evidence-backed.
 3. Add or update tests for analysis behavior.
-4. Run `pnpm lint` and `pnpm test` before opening a pull request.
+4. Run `pnpm check` and `pnpm test` before opening a pull request.
 5. Document any new capability boundary or provider requirement.
 
 ## Security
