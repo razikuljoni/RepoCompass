@@ -1,4 +1,9 @@
 import { parseAnalysisResult, type AnalysisResult } from "../analysis/analysis-result-contract.ts";
+import {
+  codeGraphToHtml,
+  codeGraphToMermaid,
+  codeGraphToReport,
+} from "../analysis/graph-export.ts";
 import { canonicalGraphJson, executeGraphQuery } from "../analysis/graph-query-engine.ts";
 import type { GraphQuery } from "../analysis/graph-query-contract.ts";
 import { answerRepositoryQuestion } from "../analysis/repository-question-engine.ts";
@@ -225,6 +230,42 @@ export function createAnalysisService(dependencies: AnalysisServiceDependencies)
       if (!response.result.graph)
         throw new AnalysisServiceError("result_unavailable", "Analysis graph is unavailable.");
       return canonicalGraphJson(response.result.graph);
+    },
+
+    async graphExport(
+      analysisId: string,
+      format: "json" | "mermaid" | "report" | "html" = "json",
+    ): Promise<{ content: string; contentType: string; filename: string }> {
+      const response = await this.result(analysisId);
+      if (!response.result.graph)
+        throw new AnalysisServiceError("result_unavailable", "Analysis graph is unavailable.");
+      const g = response.result.graph;
+      if (format === "mermaid") {
+        return {
+          content: codeGraphToMermaid(g),
+          contentType: "text/plain; charset=utf-8",
+          filename: `analysis-${analysisId}-graph.mmd`,
+        };
+      }
+      if (format === "report") {
+        return {
+          content: codeGraphToReport(g),
+          contentType: "text/markdown; charset=utf-8",
+          filename: `analysis-${analysisId}-GRAPH_REPORT.md`,
+        };
+      }
+      if (format === "html") {
+        return {
+          content: codeGraphToHtml(g),
+          contentType: "text/html; charset=utf-8",
+          filename: `analysis-${analysisId}-graph.html`,
+        };
+      }
+      return {
+        content: canonicalGraphJson(g),
+        contentType: "application/json; charset=utf-8",
+        filename: `analysis-${analysisId}-graph.json`,
+      };
     },
 
     async answer(analysisId: string, question: string) {

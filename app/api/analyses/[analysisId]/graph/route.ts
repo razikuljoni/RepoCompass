@@ -22,11 +22,17 @@ export async function GET(
     });
   }
   try {
-    const body = await createAnalysisService(dependencies).graphJson(analysisId);
-    return new Response(body, {
+    const url = new URL(request.url);
+    const rawFormat = url.searchParams.get("format") || "json";
+    const format =
+      rawFormat === "mermaid" || rawFormat === "report" || rawFormat === "html"
+        ? rawFormat
+        : "json";
+    const exported = await createAnalysisService(dependencies).graphExport(analysisId, format);
+    return new Response(exported.content, {
       headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="analysis-${analysisId}-graph.json"`,
+        "Content-Type": exported.contentType,
+        "Content-Disposition": `attachment; filename="${exported.filename}"`,
         "Cache-Control": "private, no-store",
       },
     });

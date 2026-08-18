@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { contentModel } from "@/lib/analysis/content-model";
 import { codeExtensions, extensionOf } from "@/lib/analysis/file-classification";
 import {
@@ -83,8 +83,16 @@ export default function Home() {
     [serverModel, setServerModel] = useState<Model | null>(null),
     [graph, setGraph] = useState<CodeGraph | null>(null),
     [analysisAccess, setAnalysisAccess] = useState<AnalysisAccess | null>(null),
-    [view, setView] = useState<View>("overview"),
-    [selectedFile, setSelectedFile] = useState<string>(""),
+    [view, setView] = useState<View>(() => {
+      if (typeof window === "undefined") return "overview";
+      const params = new URLSearchParams(window.location.hash.substring(1));
+      return (params.get("view") as View) || "overview";
+    }),
+    [selectedFile, setSelectedFile] = useState<string>(() => {
+      if (typeof window === "undefined") return "";
+      const params = new URLSearchParams(window.location.hash.substring(1));
+      return params.get("file") || "";
+    }),
     [importing, setImporting] = useState(false);
   const model = useMemo(
     () => (repo ? serverModel || contentModel(repo) : null),
@@ -102,6 +110,15 @@ export default function Home() {
     if (path) setSelectedFile(path);
     setView(targetView);
   }
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !repo) return;
+    const params = new URLSearchParams();
+    if (view) params.set("view", view);
+    if (selectedFile) params.set("file", selectedFile);
+    const hash = params.toString();
+    window.history.replaceState(null, "", hash ? `#${hash}` : window.location.pathname);
+  }, [view, selectedFile, repo]);
   if (!repo || !model) return <EmptyState onImported={importRepository} />;
   return (
     <main className="dynamic-app">

@@ -174,6 +174,12 @@ test("neighbors paginate deterministically and impact traversal handles cycles",
   assert.equal(impact.truncated, false);
 });
 
+import {
+  codeGraphToHtml,
+  codeGraphToMermaid,
+  codeGraphToReport,
+} from "../lib/analysis/graph-export.ts";
+
 test("canonical graph JSON is permutation-stable", () => {
   assert.equal(
     canonicalGraphJson(graph),
@@ -183,4 +189,7 @@ test("canonical graph JSON is permutation-stable", () => {
       edges: [...graph.edges].reverse(),
     }),
   );
+  assert.ok(codeGraphToMermaid(graph).includes("graph TD"));
+  assert.ok(codeGraphToReport(graph).includes("CodeGraph Analysis Report"));
+  assert.ok(codeGraphToHtml(graph).includes("<!DOCTYPE html>"));
 });
