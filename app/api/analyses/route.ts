@@ -30,6 +30,7 @@ export async function POST(request: Request): Promise<Response> {
           : { "Retry-After": String(error.retryAfterSeconds) };
       return Response.json(apiError(error.code, error.message), { status: error.status, headers });
     }
+    console.error("CREATE ANALYSIS ERROR:", error);
     return Response.json(apiError("internal_error", "Unable to create analysis."), { status: 500 });
   }
 }

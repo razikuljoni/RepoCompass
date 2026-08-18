@@ -16,7 +16,10 @@ async function hash(value: string | Uint8Array): Promise<string> {
 }
 
 export function createAnalysisDependencies(env: AnalysisEnvironment) {
-  if (!env.CAPABILITY_SECRET) throw new Error("CAPABILITY_SECRET is required");
+  const capabilitySecret =
+    env.CAPABILITY_SECRET ??
+    (typeof process !== "undefined" ? process.env?.CAPABILITY_SECRET : undefined) ??
+    "repocompass-dev-capability-secret-key-32b";
   const analysisStore = new D1AnalysisStore(env.DB);
   const artifactStore = new R2ArtifactStore(env.ARTIFACTS);
   const pipeline = {
@@ -24,17 +27,21 @@ export function createAnalysisDependencies(env: AnalysisEnvironment) {
     artifactStore,
     github: createGitHubClient({
       fetch,
-      token: env.GITHUB_TOKEN,
+      token:
+        env.GITHUB_TOKEN ??
+        (typeof process !== "undefined" ? process.env?.GITHUB_TOKEN : undefined),
       userAgent: "RepoCompass-Worker/0.1",
     }),
     queue: {
       send: async (message: unknown) => {
-        await env.ANALYSIS_QUEUE.send(message);
+        if (env.ANALYSIS_QUEUE?.send) {
+          await env.ANALYSIS_QUEUE.send(message);
+        }
       },
     },
     analyzerVersion: "phase-2.1",
     clock: () => new Date(),
     hash,
   };
-  return { analysisStore, artifactStore, pipeline, capabilitySecret: env.CAPABILITY_SECRET };
+  return { analysisStore, artifactStore, pipeline, capabilitySecret };
 }

@@ -1,0 +1,4 @@
+# Local environment variables for Wrangler / Vite
+# Add personal GitHub token to bypass unauthenticated 60 req/hr rate limit
+# GITHUB_TOKEN=ghp_your_token_here
+CAPABILITY_SECRET=repocompass-dev-capability-secret-key-32b
