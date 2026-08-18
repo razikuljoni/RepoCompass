@@ -1,5 +1,6 @@
 import { parseAnalysisResult, type AnalysisResult } from "../analysis/analysis-result-contract.ts";
 import { compareCodeGraphs } from "../analysis/graph-diff.ts";
+import { analyzePRImpact, type PRFileChange } from "../analysis/pr-intelligence.ts";
 import {
   codeGraphToHtml,
   codeGraphToMermaid,
@@ -291,6 +292,13 @@ export function createAnalysisService(dependencies: AnalysisServiceDependencies)
           "Target analysis graph is unavailable.",
         );
       return compareCodeGraphs(baseResponse.result.graph, targetResponse.result.graph);
+    },
+
+    async prImpact(analysisId: string, changes: PRFileChange[]) {
+      const response = await this.result(analysisId);
+      if (!response.result.graph)
+        throw new AnalysisServiceError("result_unavailable", "Analysis graph is unavailable.");
+      return analyzePRImpact(response.result.graph, changes);
     },
   };
 }

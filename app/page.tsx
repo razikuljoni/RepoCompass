@@ -9,7 +9,7 @@ import {
   impactedFiles,
   overviewGraphHealth,
 } from "@/lib/analysis/repository-graph-view";
-import type { AnalysisResult } from "@/lib/analysis/analysis-result-contract";
+import { analyzePRImpact, type PRFileChange } from "@/lib/analysis/pr-intelligence";
 import type { RepositoryAnswer } from "@/lib/analysis/repository-question-engine";
 import type { CodeGraph } from "@/lib/domain/code-graph";
 import type { Repo } from "@/lib/domain/repository";
@@ -43,7 +43,8 @@ type View =
   | "glossary"
   | "integrations"
   | "onboarding"
-  | "compare";
+  | "compare"
+  | "pr";
 const ignored = [
   "node_modules",
   ".git",
@@ -71,6 +72,7 @@ const nav: Array<{ id: View; label: string; icon: string }> = [
   { id: "integrations", label: "Integrations", icon: "＋" },
   { id: "onboarding", label: "Contributor path", icon: "↗" },
   { id: "compare", label: "Branches", icon: "⇄" },
+  { id: "pr", label: "PR Intelligence", icon: "⎇" },
 ];
 function bytes(value: number) {
   if (!value) return "0 B";
@@ -241,6 +243,7 @@ export default function Home() {
           )}{" "}
           {view === "onboarding" && <Onboarding repo={repo} model={model} />}{" "}
           {view === "compare" && <Branches repo={repo} model={model} />}
+          {view === "pr" && <PRIntelligenceView graph={graph} />}
         </div>
       </section>
       {importing && (
@@ -1638,6 +1641,139 @@ function Integrations({ repo, onImport }: { repo: Repo; onImport: () => void }) 
       <button type="button" className="integration-import" onClick={onImport}>
         ＋ Import another repository
       </button>
+    </>
+  );
+}
+
+function PRIntelligenceView({ graph }: { graph: CodeGraph | null }) {
+  const [inputPaths, setInputPaths] = useState("");
+  const changes = useMemo<PRFileChange[]>(() => {
+    return inputPaths
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((path) => ({
+        path: path.replace(/^[+-]\s*/, ""),
+        status: path.startsWith("-")
+          ? ("deleted" as const)
+          : path.startsWith("+")
+            ? ("added" as const)
+            : ("modified" as const),
+      }));
+  }, [inputPaths]);
+
+  const report = useMemo(() => {
+    if (!graph) return null;
+    return analyzePRImpact(graph, changes);
+  }, [graph, changes]);
+
+  return (
+    <>
+      <Title
+        k="PR INTELLIGENCE"
+        title="Pull request impact & risk analysis"
+        sub="Paste changed file paths below to compute direct impact, transitive blast radius, affected API routes, and risk score."
+      />
+      <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <article className="explorer-card" style={{ padding: "1rem" }}>
+          <b>Changed files in Pull Request (one path per line):</b>
+          <textarea
+            value={inputPaths}
+            onChange={(e) => setInputPaths(e.target.value)}
+            placeholder={`src/auth.ts\n+ src/new-feature.ts\n- src/deprecated.ts`}
+            rows={5}
+            style={{
+              width: "100%",
+              marginTop: "0.5rem",
+              padding: "0.5rem",
+              fontFamily: "monospace",
+              background: "rgba(0,0,0,0.2)",
+              color: "inherit",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: "4px",
+            }}
+          />
+        </article>
+
+        {report && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                gap: "1rem",
+              }}
+            >
+              <div className="metric">
+                <span>Risk Level</span>
+                <b
+                  style={{
+                    color:
+                      report.riskLevel === "critical" || report.riskLevel === "high"
+                        ? "#ef4444"
+                        : "#10b981",
+                  }}
+                >
+                  {report.riskLevel.toUpperCase()} ({report.riskScore}/100)
+                </b>
+              </div>
+              <div className="metric">
+                <span>Directly Affected Nodes</span>
+                <b>{report.directlyAffectedNodeCount}</b>
+              </div>
+              <div className="metric">
+                <span>Transitive Blast Radius</span>
+                <b>{report.transitiveImpactCount} nodes</b>
+              </div>
+              <div className="metric">
+                <span>Affected Routes</span>
+                <b>{report.affectedRoutes.length}</b>
+              </div>
+            </div>
+
+            {report.riskFactors.length > 0 && (
+              <article className="explorer-card" style={{ padding: "1rem" }}>
+                <b>Risk Factors:</b>
+                <ul style={{ marginTop: "0.5rem", paddingLeft: "1.2rem" }}>
+                  {report.riskFactors.map((factor, i) => (
+                    <li key={i} style={{ marginBottom: "0.25rem" }}>
+                      <b>{factor.title}</b> (+{factor.score} pts): {factor.reason}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )}
+
+            {report.affectedRoutes.length > 0 && (
+              <article className="explorer-card" style={{ padding: "1rem" }}>
+                <b>Affected API Routes ({report.affectedRoutes.length}):</b>
+                <ul style={{ marginTop: "0.5rem", paddingLeft: "1.2rem" }}>
+                  {report.affectedRoutes.map((route) => (
+                    <li key={route.id}>
+                      <code>{route.name}</code>{" "}
+                      {route.path && <span style={{ opacity: 0.7 }}>({route.path})</span>}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )}
+
+            {report.affectedPublicExports.length > 0 && (
+              <article className="explorer-card" style={{ padding: "1rem" }}>
+                <b>Affected Public Exports ({report.affectedPublicExports.length}):</b>
+                <ul style={{ marginTop: "0.5rem", paddingLeft: "1.2rem" }}>
+                  {report.affectedPublicExports.map((symbol) => (
+                    <li key={symbol.id}>
+                      <code>{symbol.name}</code>{" "}
+                      {symbol.path && <span style={{ opacity: 0.7 }}>({symbol.path})</span>}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )}
+          </div>
+        )}
+      </div>
     </>
   );
 }
