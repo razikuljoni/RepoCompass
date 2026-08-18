@@ -42,6 +42,10 @@ export async function readSmallJson(request: Request): Promise<unknown> {
   }
 }
 
+export function parseCapabilityTokenFromHeader(header: string | null): string | null {
+  return bearerToken(header);
+}
+
 export async function isAuthorized(
   authorization: string | null,
   secret: string,
