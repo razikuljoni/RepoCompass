@@ -29,21 +29,25 @@ export class R2ArtifactStore implements ArtifactStore {
   constructor(private readonly bucket: R2Binding) {}
 
   async put(key: string, bytes: Uint8Array): Promise<Artifact> {
+    console.log("R2 PUT START:", key, "BYTES:", bytes.length);
     const storedBytes = bytes.slice();
     const [hash, existing] = await Promise.all([sha256(storedBytes), this.get(key)]);
     if (existing) {
+      console.log("R2 EXISTING HIT:", key);
       if (existing.hash !== hash) throw new ArtifactConflictError(key);
       return existing;
     }
-    const result = await this.bucket.put(key, storedBytes, {
-      customMetadata: { sha256: hash },
-      onlyIf: { etagDoesNotMatch: "*" },
-    });
-    if (result === null) {
-      const raced = await this.get(key);
-      if (!raced || raced.hash !== hash) throw new ArtifactConflictError(key);
-      return raced;
+    console.log("R2 CALLING BUCKET.PUT:", key);
+    let result: unknown = null;
+    try {
+      result = await this.bucket.put(key, storedBytes, {
+        customMetadata: { sha256: hash },
+      });
+    } catch (r2Err) {
+      console.error("R2 BUCKET.PUT ERROR:", r2Err);
+      throw r2Err;
     }
+    console.log("R2 BUCKET.PUT OK:", key);
     const written = await this.get(key);
     if (!written || written.hash !== hash) throw new ArtifactIntegrityError(key);
     return written;

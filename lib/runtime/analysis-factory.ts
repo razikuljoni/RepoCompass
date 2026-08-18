@@ -34,8 +34,16 @@ export function createAnalysisDependencies(env: AnalysisEnvironment) {
     }),
     queue: {
       send: async (message: unknown) => {
+        console.log(
+          "SENDING QUEUE MSG:",
+          JSON.stringify(message),
+          "HAS_QUEUE:",
+          Boolean(env.ANALYSIS_QUEUE?.send),
+        );
         if (env.ANALYSIS_QUEUE?.send) {
           await env.ANALYSIS_QUEUE.send(message);
+        } else {
+          console.error("ANALYSIS_QUEUE BINDING MISSING OR NO SEND METHOD!");
         }
       },
     },

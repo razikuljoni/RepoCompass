@@ -18,15 +18,31 @@ export type RuntimeQueueBatch = {
 
 function decodeMessage(body: unknown): AnalysisQueueMessageV1 {
   if (typeof body !== "string") return parseAnalysisQueueMessage(body);
-  return parseAnalysisQueueMessage(JSON.parse(body));
+  try {
+    return parseAnalysisQueueMessage(JSON.parse(body));
+  } catch {
+    return parseAnalysisQueueMessage(body);
+  }
 }
 
 function failure(error: unknown): AnalysisJobError | null {
-  if (!(error instanceof GitHubClientError)) return null;
-  if (["aborted", "network", "rate_limited", "server_error"].includes(error.code)) return null;
+  if (!(error instanceof GitHubClientError)) {
+    if (error instanceof Error) {
+      return { code: "analysis_failed", message: error.message, retryable: false };
+    }
+    return { code: "analysis_failed", message: "Analysis processing failed.", retryable: false };
+  }
   if (error.code === "not_found") {
     return { code: "repository_not_found", message: error.message, retryable: false };
   }
+  if (error.code === "rate_limited") {
+    return {
+      code: "rate_limited",
+      message: "GitHub API rate limit exceeded. Configure GITHUB_TOKEN in Worker secrets.",
+      retryable: false,
+    };
+  }
+  if (["aborted", "network", "server_error"].includes(error.code)) return null;
   return { code: "invalid_provider_response", message: error.message, retryable: false };
 }
 
@@ -52,12 +68,14 @@ async function markFailed(
 
 export function createAnalysisQueueConsumer(dependencies: JobPipelineDependencies) {
   return async (batch: RuntimeQueueBatch): Promise<void> => {
+    console.log("CONSUMING QUEUE BATCH COUNT:", batch.messages.length);
     await Promise.all(
       batch.messages.map(async (delivery) => {
         let queueMessage: AnalysisQueueMessageV1;
         try {
           queueMessage = decodeMessage(delivery.body);
-        } catch {
+        } catch (err) {
+          console.error("QUEUE MESSAGE DECODE ERROR:", err, "BODY:", delivery.body);
           delivery.ack();
           return;
         }
@@ -65,7 +83,18 @@ export function createAnalysisQueueConsumer(dependencies: JobPipelineDependencie
           await processAnalysisMessage(queueMessage, dependencies);
           delivery.ack();
         } catch (error) {
-          const jobError = failure(error);
+          console.error("QUEUE PROCESS MESSAGE ERROR:", error, "JOB:", queueMessage.jobId);
+          let jobError = failure(error);
+          if (!jobError) {
+            const currentJob = await dependencies.analysisStore
+              .getAnalysisJob(queueMessage.jobId)
+              .catch(() => null);
+            if (currentJob && currentJob.attemptCount >= 3) {
+              const msg =
+                error instanceof Error ? error.message : "Analysis failed after maximum retries.";
+              jobError = { code: "max_attempts_exceeded", message: msg, retryable: false };
+            }
+          }
           if (!jobError) {
             const delaySeconds =
               error instanceof GitHubClientError ? error.retryAfterSeconds : undefined;
@@ -75,7 +104,8 @@ export function createAnalysisQueueConsumer(dependencies: JobPipelineDependencie
           try {
             await markFailed(queueMessage, jobError, dependencies);
             delivery.ack();
-          } catch {
+          } catch (markErr) {
+            console.error("MARK FAILED ERROR:", markErr);
             delivery.retry();
           }
         }

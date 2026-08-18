@@ -1,51 +1,49 @@
 {
-	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "repo-compass",
-	"main": "worker/index.ts",
-	"compatibility_date": "2026-05-22",
-	"compatibility_flags": [
-		"nodejs_compat"
-	],
-	"vars": {
-		"CAPABILITY_SECRET": "repocompass-dev-capability-secret-key-32b",
-	},
-	"assets": {
-		"directory": "dist/client",
-		"binding": "ASSETS",
-		"run_worker_first": false,
-	},
-	"images": {
-		"binding": "IMAGES",
-	},
-	"d1_databases": [
-		{
-			"binding": "DB",
-			"database_name": "repo-compass-production",
-			"database_id": "0938b3a7-3ed1-4355-88fe-b64b9eb44924",
-			"migrations_dir": "drizzle",
-		},
-	],
-	"r2_buckets": [
-		{
-			"binding": "ARTIFACTS",
-			"bucket_name": "repo-compass-artifacts-production",
-		},
-	],
-	"queues": {
-		"producers": [
-			{
-				"binding": "ANALYSIS_QUEUE",
-				"queue": "repo-compass-analysis-production",
-			},
-		],
-		"consumers": [
-			{
-				"queue": "repo-compass-analysis-production",
-				"dead_letter_queue": "repo-compass-analysis-dlq-production",
-				"max_batch_size": 5,
-				"max_batch_timeout": 5,
-				"max_retries": 3,
-			},
-		],
-	},
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "repo-compass",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-05-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "CAPABILITY_SECRET": "repocompass-dev-capability-secret-key-32b",
+  },
+  "assets": {
+    "directory": "dist/client",
+    "binding": "ASSETS",
+    "run_worker_first": false,
+  },
+  "images": {
+    "binding": "IMAGES",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "repo-compass-production",
+      "database_id": "0938b3a7-3ed1-4355-88fe-b64b9eb44924",
+      "migrations_dir": "drizzle",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS",
+      "bucket_name": "repo-compass-artifacts-production",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "ANALYSIS_QUEUE",
+        "queue": "repo-compass-analysis-production",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "repo-compass-analysis-production",
+        "dead_letter_queue": "repo-compass-analysis-dlq-production",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+      },
+    ],
+  },
 }
