@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { contentModel } from "@/lib/analysis/content-model";
 import { codeExtensions, extensionOf } from "@/lib/analysis/file-classification";
 import type { AnalysisResult } from "@/lib/analysis/analysis-result-contract";
+import type { RepositoryAnswer } from "@/lib/analysis/repository-question-engine";
 import type { CodeGraph } from "@/lib/domain/code-graph";
 import type { Repo } from "@/lib/domain/repository";
 import type { Model } from "@/lib/domain/repository-model";
@@ -12,7 +13,13 @@ import type {
   CreateAnalysisResponse,
 } from "@/lib/runtime/analysis-service";
 
-type ImportedRepository = { repo: Repo; model?: Model; graph?: CodeGraph };
+type AnalysisAccess = { analysisId: string; capabilityToken: string };
+type ImportedRepository = {
+  repo: Repo;
+  model?: Model;
+  graph?: CodeGraph;
+  analysisAccess?: AnalysisAccess;
+};
 type ApiErrorResponse = { error: { code: string; message: string } };
 type BusyStatus = Pick<AnalysisStatusResponse, "status" | "stage" | "progress">;
 
@@ -68,6 +75,7 @@ export default function Home() {
   const [repo, setRepo] = useState<Repo | null>(null),
     [serverModel, setServerModel] = useState<Model | null>(null),
     [graph, setGraph] = useState<CodeGraph | null>(null),
+    [analysisAccess, setAnalysisAccess] = useState<AnalysisAccess | null>(null),
     [view, setView] = useState<View>("overview"),
     [importing, setImporting] = useState(false);
   const model = useMemo(
@@ -78,6 +86,7 @@ export default function Home() {
     setRepo(data.repo);
     setServerModel(data.model || null);
     setGraph(data.graph || null);
+    setAnalysisAccess(data.analysisAccess || null);
     setView("overview");
   }
   if (!repo || !model) return <EmptyState onImported={importRepository} />;
@@ -155,7 +164,7 @@ export default function Home() {
           {view === "overview" && <Overview repo={repo} model={model} graph={graph} />}{" "}
           {view === "explorer" && <Explorer repo={repo} model={model} />}{" "}
           {view === "impact" && <Impact repo={repo} model={model} />}{" "}
-          {view === "ask" && <AskRepo repo={repo} model={model} />}{" "}
+          {view === "ask" && <AskRepo repo={repo} model={model} analysisAccess={analysisAccess} />}{" "}
           {view === "architecture" && <Architecture repo={repo} model={model} />}{" "}
           {view === "security" && <Security repo={repo} model={model} />}{" "}
           {view === "risks" && <Risks repo={repo} model={model} />}{" "}
@@ -303,7 +312,12 @@ function ImportPanel({ onImported }: { onImported: (data: ImportedRepository) =>
       if (!resultResponse.ok)
         throw new Error(apiError(resultData, "Analysis result is unavailable."));
       const { result } = resultData as AnalysisResultResponse;
-      onImported(remotePayload(result));
+      onImported(
+        remotePayload(result, {
+          analysisId: created.analysisId,
+          capabilityToken: created.capabilityToken,
+        }),
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Analysis failed.");
       setBusy(null);
@@ -441,7 +455,7 @@ function ImportPanel({ onImported }: { onImported: (data: ImportedRepository) =>
   );
 }
 
-function remotePayload(result: AnalysisResult): ImportedRepository {
+function remotePayload(result: AnalysisResult, analysisAccess: AnalysisAccess): ImportedRepository {
   const { repository, snapshot, model, coverage } = result;
   return {
     repo: {
@@ -462,6 +476,7 @@ function remotePayload(result: AnalysisResult): ImportedRepository {
     },
     model,
     graph: result.graph,
+    analysisAccess,
   };
 }
 
@@ -1088,12 +1103,23 @@ function Branches({ repo }: { repo: Repo; model: Model }) {
   );
 }
 
-function AskRepo({ repo, model }: { repo: Repo; model: Model }) {
+function AskRepo({
+  repo,
+  model,
+  analysisAccess,
+}: {
+  repo: Repo;
+  model: Model;
+  analysisAccess: AnalysisAccess | null;
+}) {
   const [q, setQ] = useState("");
   const [asked, setAsked] = useState("");
-  const answer = useMemo(() => {
+  const [remoteAnswer, setRemoteAnswer] = useState<RepositoryAnswer | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const localAnswer = useMemo(() => {
     const n = asked.toLowerCase();
-    if (!asked) return null;
+    if (!asked || analysisAccess) return null;
     if (/auth|login|session/.test(n)) {
       const matches = (model.symbols || [])
         .filter((s) => /auth|login|session/i.test(s.name + s.file))
@@ -1130,7 +1156,36 @@ function AskRepo({ repo, model }: { repo: Repo; model: Model }) {
         : "The indexed evidence does not support a reliable answer to this question.",
       evidence: matches.map((x) => `${x.name} — ${x.file}:${x.line}`),
     };
-  }, [asked, model]);
+  }, [analysisAccess, asked, model]);
+  async function ask() {
+    const question = q.trim();
+    if (!question) return;
+    setAsked(question);
+    setRemoteAnswer(null);
+    setError("");
+    if (!analysisAccess) return;
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `/api/analyses/${encodeURIComponent(analysisAccess.analysisId)}/answer`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${analysisAccess.capabilityToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ question }),
+        },
+      );
+      const data = await responseJson(response);
+      if (!response.ok) throw new Error(apiError(data, "Repository answer is unavailable."));
+      setRemoteAnswer((data as { answer: RepositoryAnswer }).answer);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Repository answer is unavailable.");
+    } finally {
+      setLoading(false);
+    }
+  }
   return (
     <>
       <Title
@@ -1142,7 +1197,7 @@ function AskRepo({ repo, model }: { repo: Repo; model: Model }) {
         className="ask-real"
         onSubmit={(e) => {
           e.preventDefault();
-          setAsked(q);
+          void ask();
         }}
       >
         <input
@@ -1151,14 +1206,40 @@ function AskRepo({ repo, model }: { repo: Repo; model: Model }) {
           onChange={(e) => setQ(e.target.value)}
           placeholder="Where is authentication handled?"
         />
-        <button type="submit">Search evidence</button>
+        <button type="submit" disabled={loading}>
+          {loading ? "Searching…" : "Search evidence"}
+        </button>
       </form>
-      {answer && (
+      {error && <p className="real-error">{error}</p>}
+      {remoteAnswer && (
+        <section className="dcard answer-real">
+          <span>REPOSITORY EVIDENCE · {remoteAnswer.confidence.toUpperCase()}</span>
+          <h2>
+            {remoteAnswer.verifiedFacts.length
+              ? `${remoteAnswer.verifiedFacts.length} verified facts`
+              : "Insufficient evidence"}
+          </h2>
+          {remoteAnswer.verifiedFacts.map((fact) => (
+            <p key={fact.text}>{fact.text}</p>
+          ))}
+          {remoteAnswer.unknowns.map((unknown) => (
+            <p key={unknown}>{unknown}</p>
+          ))}
+          {remoteAnswer.citations.map((citation) => (
+            <code key={citation.id}>
+              {citation.path}
+              {citation.startLine ? `:${citation.startLine}` : ""} ·{" "}
+              {citation.commitSha.slice(0, 12)}
+            </code>
+          ))}
+        </section>
+      )}
+      {localAnswer && (
         <section className="dcard answer-real">
           <span>REPOSITORY EVIDENCE</span>
-          <h2>{answer.title}</h2>
-          <p>{answer.body}</p>
-          {answer.evidence.map((x) => (
+          <h2>{localAnswer.title}</h2>
+          <p>{localAnswer.body}</p>
+          {localAnswer.evidence.map((x) => (
             <code key={x}>{x}</code>
           ))}
         </section>
