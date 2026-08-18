@@ -145,18 +145,18 @@ export async function createAnalysis(
     createdAt,
   });
   const idempotencyKey = await dependencies.hash(`${snapshot.id}\0${dependencies.analyzerVersion}`);
+  const existing = await dependencies.analysisStore.getJobByIdempotencyKey(idempotencyKey);
+  if (existing) return { job: existing, snapshot };
+
   const jobId = await identifier(dependencies, "job", idempotencyKey);
-  const [existing, job] = await Promise.all([
-    dependencies.analysisStore.getJobByIdempotencyKey(idempotencyKey),
-    dependencies.analysisStore.createAnalysisJob({
-      id: jobId,
-      snapshotId: snapshot.id,
-      analyzerVersion: dependencies.analyzerVersion,
-      idempotencyKey,
-      createdAt,
-    }),
-  ]);
-  if (!existing) await dependencies.queue.send(message(job.id, "inventory"));
+  const job = await dependencies.analysisStore.createAnalysisJob({
+    id: jobId,
+    snapshotId: snapshot.id,
+    analyzerVersion: dependencies.analyzerVersion,
+    idempotencyKey,
+    createdAt,
+  });
+  await dependencies.queue.send(message(job.id, "inventory"));
   return { job, snapshot };
 }
 
