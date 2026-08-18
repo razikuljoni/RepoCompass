@@ -1,13 +1,12 @@
 diff --git a/lib/typescript.js b/lib/typescript.js
-index 0554fc3fc707ce3edbc3c4f8f4d77f8aa3def7ba..be251afd1259c27b746fa28890f2827bd4dca01e 100644
 --- a/lib/typescript.js
 +++ b/lib/typescript.js
-@@ -3766,7 +3766,7 @@ function skipWhile(array, predicate) {
+@@ -3766,7 +3766,7 @@
    }
  }
  function isNodeLikeSystem() {
 -  return typeof process !== "undefined" && !!process.nextTick && !process.browser && typeof require !== "undefined";
 +  return typeof WebSocketPair === "undefined" && typeof process !== "undefined" && !!process.nextTick && !process.browser && typeof require !== "undefined";
-  }
-
+ }
+ 
  // src/compiler/debug.ts

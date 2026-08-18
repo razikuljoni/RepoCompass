@@ -2,6 +2,7 @@
 import { useMemo, useRef, useState } from "react";
 import { contentModel } from "@/lib/analysis/content-model";
 import { codeExtensions, extensionOf } from "@/lib/analysis/file-classification";
+import { fileGraphDetails, impactedFiles } from "@/lib/analysis/repository-graph-view";
 import type { AnalysisResult } from "@/lib/analysis/analysis-result-contract";
 import type { RepositoryAnswer } from "@/lib/analysis/repository-question-engine";
 import type { CodeGraph } from "@/lib/domain/code-graph";
@@ -162,8 +163,8 @@ export default function Home() {
         </header>
         <div className="dynamic-content">
           {view === "overview" && <Overview repo={repo} model={model} graph={graph} />}{" "}
-          {view === "explorer" && <Explorer repo={repo} model={model} />}{" "}
-          {view === "impact" && <Impact repo={repo} model={model} />}{" "}
+          {view === "explorer" && <Explorer repo={repo} model={model} graph={graph} />}{" "}
+          {view === "impact" && <Impact repo={repo} model={model} graph={graph} />}{" "}
           {view === "ask" && <AskRepo repo={repo} model={model} analysisAccess={analysisAccess} />}{" "}
           {view === "architecture" && <Architecture repo={repo} model={model} />}{" "}
           {view === "security" && <Security repo={repo} model={model} />}{" "}
@@ -734,7 +735,7 @@ function TreeRows({
     </>
   );
 }
-function Explorer({ repo, model }: { repo: Repo; model: Model }) {
+function Explorer({ repo, model, graph }: { repo: Repo; model: Model; graph: CodeGraph | null }) {
   const [q, setQ] = useState(""),
     [selected, setSelected] = useState(repo.sampleFiles[0] || ""),
     [expanded, setExpanded] = useState<Set<string>>(
@@ -742,6 +743,7 @@ function Explorer({ repo, model }: { repo: Repo; model: Model }) {
     );
   const tree = useMemo(() => makeTree(repo.sampleFiles), [repo.sampleFiles]);
   const selectedFile = repo.indexedFiles?.find((f) => f.path === selected);
+  const graphDetails = useMemo(() => fileGraphDetails(graph, selected), [graph, selected]);
   return (
     <>
       <Title
@@ -810,6 +812,27 @@ function Explorer({ repo, model }: { repo: Repo; model: Model }) {
               <dd>{selectedFile?.content ? "Yes" : "No"}</dd>
             </dl>
           )}
+          {graph?.schemaVersion === "2.0" && (
+            <section aria-label="Graph relationships">
+              <h3>Graph relationships</h3>
+              <p>
+                {graphDetails.symbols.length} symbols · {graphDetails.routes.length} routes ·{" "}
+                {graphDetails.relationships.length} relationships
+              </p>
+              {graphDetails.relationships.slice(0, 20).map((relationship) => (
+                <div className="neighbor" key={relationship.edgeId}>
+                  <span>
+                    {relationship.direction} {relationship.kind}
+                  </span>
+                  <code>
+                    {relationship.path || relationship.name}
+                    {relationship.line ? `:${relationship.line}` : ""}
+                  </code>
+                </div>
+              ))}
+              {!graphDetails.relationships.length && <p>No graph relationships found.</p>}
+            </section>
+          )}
           {selectedFile?.content ? (
             <pre className="file-preview">
               <code>{selectedFile.content.split("\n").slice(0, 30).join("\n")}</code>
@@ -825,10 +848,11 @@ function Explorer({ repo, model }: { repo: Repo; model: Model }) {
     </>
   );
 }
-function Impact({ repo, model }: { repo: Repo; model: Model }) {
+function Impact({ repo, model, graph }: { repo: Repo; model: Model; graph: CodeGraph | null }) {
   const [target, setTarget] = useState(model.sourceFiles[0] || repo.sampleFiles[0] || "");
+  const graphImpact = useMemo(() => impactedFiles(graph, target), [graph, target]);
   const area = target.split("/")[0],
-    near = repo.sampleFiles
+    pathImpact = repo.sampleFiles
       .filter(
         (p) =>
           p !== target &&
@@ -836,6 +860,7 @@ function Impact({ repo, model }: { repo: Repo; model: Model }) {
             p.split("/").at(-1)?.split(".")[0] === target.split("/").at(-1)?.split(".")[0]),
       )
       .slice(0, 20),
+    near = graph?.schemaVersion === "2.0" ? graphImpact.map((item) => item.path) : pathImpact,
     tests = model.testFiles.filter((p) =>
       p.includes(target.split("/").at(-1)?.split(".")[0] || "__none__"),
     );
@@ -843,8 +868,14 @@ function Impact({ repo, model }: { repo: Repo; model: Model }) {
     <>
       <Title
         k="IMPACT LAB"
-        title="Path-level blast radius"
-        sub="Results are derived from repository paths. Call-graph impact remains explicitly unavailable until content parsing completes."
+        title={
+          graph?.schemaVersion === "2.0" ? "Graph-backed blast radius" : "Path-level blast radius"
+        }
+        sub={
+          graph?.schemaVersion === "2.0"
+            ? "Incoming import, require, reference, call, and test relationships. Traversal is cycle-safe and bounded to three hops."
+            : "Results are derived from repository paths. Call-graph impact remains unavailable for local imports."
+        }
       />
       <div className="target-select">
         <label>
@@ -863,12 +894,21 @@ function Impact({ repo, model }: { repo: Repo; model: Model }) {
             <span>TARGET</span>
             <code>{target}</code>
           </div>
-          {near.map((p) => (
-            <div className="neighbor" key={p}>
-              <span>{p.startsWith(`${area}/`) ? "same area" : "same basename"}</span>
-              <code>{p}</code>
-            </div>
-          ))}
+          {near.map((p) => {
+            const impact = graphImpact.find((item) => item.path === p);
+            return (
+              <div className="neighbor" key={p}>
+                <span>
+                  {impact
+                    ? `${impact.kinds.join(", ")} · ${impact.depth} hop${impact.depth === 1 ? "" : "s"}`
+                    : p.startsWith(`${area}/`)
+                      ? "same area"
+                      : "same basename"}
+                </span>
+                <code>{p}</code>
+              </div>
+            );
+          })}
           {!near.length && <p className="nothing">No related paths detected.</p>}
         </section>
         <aside className="dcard">
@@ -886,7 +926,9 @@ function Impact({ repo, model }: { repo: Repo; model: Model }) {
             <span>CI workflows</span>
           </div>
           <p className="honest-note">
-            Verified structural proximity only. Import/call relationships require AST analysis.
+            {graph?.schemaVersion === "2.0"
+              ? "Verified incoming relationships from immutable snapshot graph."
+              : "Verified structural proximity only. Import/call relationships require remote AST analysis."}
           </p>
         </aside>
       </div>
