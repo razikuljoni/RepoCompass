@@ -2,7 +2,13 @@
 import { useMemo, useRef, useState } from "react";
 import { contentModel } from "@/lib/analysis/content-model";
 import { codeExtensions, extensionOf } from "@/lib/analysis/file-classification";
-import { fileGraphDetails, impactedFiles } from "@/lib/analysis/repository-graph-view";
+import {
+  architectureGraphSummary,
+  fileGraphDetails,
+  findRelatedGraphNodes,
+  impactedFiles,
+  overviewGraphHealth,
+} from "@/lib/analysis/repository-graph-view";
 import type { AnalysisResult } from "@/lib/analysis/analysis-result-contract";
 import type { RepositoryAnswer } from "@/lib/analysis/repository-question-engine";
 import type { CodeGraph } from "@/lib/domain/code-graph";
@@ -78,6 +84,7 @@ export default function Home() {
     [graph, setGraph] = useState<CodeGraph | null>(null),
     [analysisAccess, setAnalysisAccess] = useState<AnalysisAccess | null>(null),
     [view, setView] = useState<View>("overview"),
+    [selectedFile, setSelectedFile] = useState<string>(""),
     [importing, setImporting] = useState(false);
   const model = useMemo(
     () => (repo ? serverModel || contentModel(repo) : null),
@@ -88,7 +95,12 @@ export default function Home() {
     setServerModel(data.model || null);
     setGraph(data.graph || null);
     setAnalysisAccess(data.analysisAccess || null);
+    setSelectedFile("");
     setView("overview");
+  }
+  function navigateToFile(path: string, targetView: View = "explorer") {
+    if (path) setSelectedFile(path);
+    setView(targetView);
   }
   if (!repo || !model) return <EmptyState onImported={importRepository} />;
   return (
@@ -163,13 +175,48 @@ export default function Home() {
         </header>
         <div className="dynamic-content">
           {view === "overview" && <Overview repo={repo} model={model} graph={graph} />}{" "}
-          {view === "explorer" && <Explorer repo={repo} model={model} graph={graph} />}{" "}
+          {view === "explorer" && (
+            <Explorer
+              repo={repo}
+              model={model}
+              graph={graph}
+              selectedFile={selectedFile}
+              onSelectFile={setSelectedFile}
+            />
+          )}{" "}
           {view === "impact" && <Impact repo={repo} model={model} graph={graph} />}{" "}
           {view === "ask" && <AskRepo repo={repo} model={model} analysisAccess={analysisAccess} />}{" "}
-          {view === "architecture" && <Architecture repo={repo} model={model} />}{" "}
-          {view === "security" && <Security repo={repo} model={model} />}{" "}
-          {view === "risks" && <Risks repo={repo} model={model} />}{" "}
-          {view === "recommendations" && <Recommendations repo={repo} model={model} />}{" "}
+          {view === "architecture" && (
+            <Architecture
+              repo={repo}
+              model={model}
+              graph={graph}
+              onNavigate={(p) => navigateToFile(p, "explorer")}
+            />
+          )}{" "}
+          {view === "security" && (
+            <Security
+              repo={repo}
+              model={model}
+              graph={graph}
+              onNavigate={(p) => navigateToFile(p, "explorer")}
+            />
+          )}{" "}
+          {view === "risks" && (
+            <Risks
+              repo={repo}
+              model={model}
+              graph={graph}
+              onNavigate={(p) => navigateToFile(p, "explorer")}
+            />
+          )}{" "}
+          {view === "recommendations" && (
+            <Recommendations
+              repo={repo}
+              model={model}
+              onNavigate={(p) => navigateToFile(p, "explorer")}
+            />
+          )}{" "}
           {view === "evolution" && <Evolution repo={repo} model={model} />}{" "}
           {view === "glossary" && <Glossary repo={repo} model={model} />}{" "}
           {view === "integrations" && (
@@ -491,6 +538,7 @@ function Title({ k, title, sub }: { k: string; title: string; sub: string }) {
   );
 }
 function Overview({ repo, model, graph }: { repo: Repo; model: Model; graph: CodeGraph | null }) {
+  const health = graph ? overviewGraphHealth(graph) : null;
   return (
     <>
       <Title
@@ -591,6 +639,47 @@ function Overview({ repo, model, graph }: { repo: Repo; model: Model; graph: Cod
           ))}
         </section>
       </div>
+      {health && (
+        <div className="dash-grid">
+          <section className="dcard">
+            <h2>Parser Health</h2>
+            <div className="coverage-row">
+              <span>Syntax errors</span>
+              <b>{health.diagnostics.syntaxErrors}</b>
+            </div>
+            <div className="coverage-row">
+              <span>Unresolved imports</span>
+              <b>{health.diagnostics.unresolvedImports}</b>
+            </div>
+            <div className="coverage-row">
+              <span>Unsupported files</span>
+              <b>{health.diagnostics.unsupportedFiles}</b>
+            </div>
+          </section>
+          <section className="dcard">
+            <h2>Coverage</h2>
+            <div className="coverage-row">
+              <span>Analyzed</span>
+              <b>{health.coverage.analyzedFiles}</b>
+            </div>
+            <div className="coverage-row">
+              <span>Skipped</span>
+              <b>{health.coverage.skippedFiles}</b>
+            </div>
+            <div className="coverage-row">
+              <span>Total</span>
+              <b>{health.coverage.totalFiles}</b>
+            </div>
+          </section>
+          <section className="dcard">
+            <h2>Health Score</h2>
+            <div className="coverage-row">
+              <span>Score</span>
+              <b>{health.healthScore}</b>
+            </div>
+          </section>
+        </div>
+      )}
     </>
   );
 }
@@ -735,12 +824,29 @@ function TreeRows({
     </>
   );
 }
-function Explorer({ repo, model, graph }: { repo: Repo; model: Model; graph: CodeGraph | null }) {
+function Explorer({
+  repo,
+  model,
+  graph,
+  selectedFile: externalSelected,
+  onSelectFile,
+}: {
+  repo: Repo;
+  model: Model;
+  graph: CodeGraph | null;
+  selectedFile?: string;
+  onSelectFile?: (path: string) => void;
+}) {
   const [q, setQ] = useState(""),
-    [selected, setSelected] = useState(repo.sampleFiles[0] || ""),
+    [localSelected, setLocalSelected] = useState(repo.sampleFiles[0] || ""),
     [expanded, setExpanded] = useState<Set<string>>(
       () => new Set(model.topDirs.slice(0, 1).map((d) => d.name)),
     );
+  const selected = externalSelected || localSelected;
+  const setSelected = (path: string) => {
+    setLocalSelected(path);
+    if (onSelectFile) onSelectFile(path);
+  };
   const tree = useMemo(() => makeTree(repo.sampleFiles), [repo.sampleFiles]);
   const selectedFile = repo.indexedFiles?.find((f) => f.path === selected);
   const graphDetails = useMemo(() => fileGraphDetails(graph, selected), [graph, selected]);
@@ -935,7 +1041,18 @@ function Impact({ repo, model, graph }: { repo: Repo; model: Model; graph: CodeG
     </>
   );
 }
-function Architecture({ repo, model }: { repo: Repo; model: Model }) {
+function Architecture({
+  repo,
+  model,
+  graph,
+  onNavigate,
+}: {
+  repo: Repo;
+  model: Model;
+  graph: CodeGraph | null;
+  onNavigate?: (path: string) => void;
+}) {
+  const archSummary = useMemo(() => architectureGraphSummary(graph), [graph]);
   return (
     <>
       <Title
@@ -944,39 +1061,89 @@ function Architecture({ repo, model }: { repo: Repo; model: Model }) {
         sub={`Top-level boundaries detected from ${repo.sampleFiles.length.toLocaleString()} available indexed paths.`}
       />
       <div className="arch-real">
-        {model.topDirs.map((d, i) => (
-          <article key={d.name}>
-            <span>{String(i + 1).padStart(2, "0")}</span>
-            <div>
-              <h2>{d.name}</h2>
-              <p>
-                {d.count} files · {Math.round((d.count / Math.max(1, repo.files)) * 100)}% of
-                repository
-              </p>
-            </div>
-            <div className="arch-types">
-              {model.extensions
-                .filter((e) =>
-                  repo.sampleFiles.some(
-                    (p) => p.startsWith(`${d.name}/`) && extensionOf(p) === e.name,
-                  ),
-                )
-                .slice(0, 4)
-                .map((e) => (
-                  <code key={e.name}>.{e.name}</code>
-                ))}
-            </div>
-          </article>
-        ))}
+        {model.topDirs.map((d, i) => {
+          const dirInfo = archSummary?.topDirectories.find((td) => td.name === d.name);
+          return (
+            <article key={d.name}>
+              <span>{String(i + 1).padStart(2, "0")}</span>
+              <div>
+                <h2>{d.name}</h2>
+                <p>
+                  {d.count} files · {Math.round((d.count / Math.max(1, repo.files)) * 100)}% of
+                  repository
+                  {dirInfo ? ` · In: ${dirInfo.fanIn} Out: ${dirInfo.fanOut}` : ""}
+                </p>
+              </div>
+              <div className="arch-types">
+                {model.extensions
+                  .filter((e) =>
+                    repo.sampleFiles.some(
+                      (p) => p.startsWith(`${d.name}/`) && extensionOf(p) === e.name,
+                    ),
+                  )
+                  .slice(0, 4)
+                  .map((e) => (
+                    <code key={e.name}>.{e.name}</code>
+                  ))}
+              </div>
+            </article>
+          );
+        })}
       </div>
+      {archSummary && (
+        <div style={{ marginTop: "1.5rem" }}>
+          <h2>Hub Modules (Highest Fan-In + Fan-Out)</h2>
+          <div style={{ display: "grid", gap: "0.5rem", marginTop: "0.5rem" }}>
+            {archSummary.hubs.map((hub) => (
+              <div
+                key={hub.path}
+                className="neighbor"
+                style={{ cursor: onNavigate ? "pointer" : "default" }}
+                onClick={() => onNavigate?.(hub.path)}
+              >
+                <span>
+                  Fan-In: {hub.fanIn} · Fan-Out: {hub.fanOut}
+                </span>
+                <code>{hub.path}</code>
+              </div>
+            ))}
+          </div>
+          {archSummary.flows.length > 0 && (
+            <div style={{ marginTop: "1.5rem" }}>
+              <h2>Cross-Directory Dependency Flows</h2>
+              <div style={{ display: "grid", gap: "0.5rem", marginTop: "0.5rem" }}>
+                {archSummary.flows.map((flow) => (
+                  <div key={`${flow.fromDir}->${flow.toDir}`} className="neighbor">
+                    <span>{flow.count} connections</span>
+                    <code>
+                      {flow.fromDir} → {flow.toDir}
+                    </code>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <div className="evidence-boundary">
-        Topology is verified from file paths. Dependencies and runtime flows are withheld until
-        AST/import extraction is available.
+        {graph?.schemaVersion === "2.0"
+          ? "Topology verified from AST and module import graph."
+          : "Topology is verified from file paths. Dependencies and runtime flows are withheld until AST/import extraction is available."}
       </div>
     </>
   );
 }
-function Security({ repo, model }: { repo: Repo; model: Model }) {
+function Security({
+  repo,
+  model,
+  graph,
+  onNavigate,
+}: {
+  repo: Repo;
+  model: Model;
+  graph: CodeGraph | null;
+  onNavigate?: (path: string) => void;
+}) {
   return (
     <>
       <Title
@@ -986,16 +1153,26 @@ function Security({ repo, model }: { repo: Repo; model: Model }) {
       />
       <div className="security-real">
         <section>
-          {model.security.map((s) => (
-            <article key={s.title}>
-              <span className={s.level.toLowerCase()}>{s.level}</span>
-              <div>
-                <h2>{s.title}</h2>
-                <p>{s.detail}</p>
-                {s.file && <code>{s.file}</code>}
-              </div>
-            </article>
-          ))}
+          {model.security.map((s) => {
+            const nodes = findRelatedGraphNodes(graph, s.file);
+            return (
+              <article key={s.title}>
+                <span className={s.level.toLowerCase()}>{s.level}</span>
+                <div>
+                  <h2>{s.title}</h2>
+                  <p>{s.detail}</p>
+                  {s.file && (
+                    <code
+                      style={{ cursor: onNavigate ? "pointer" : "default" }}
+                      onClick={() => onNavigate?.(s.file!)}
+                    >
+                      {s.file} {nodes.length > 0 ? `(${nodes.length} graph nodes)` : ""}
+                    </code>
+                  )}
+                </div>
+              </article>
+            );
+          })}
         </section>
         <aside className="dcard">
           <h2>Coverage boundary</h2>
@@ -1018,7 +1195,17 @@ function Security({ repo, model }: { repo: Repo; model: Model }) {
     </>
   );
 }
-function Risks({ repo, model }: { repo: Repo; model: Model }) {
+function Risks({
+  repo,
+  model,
+  graph,
+  onNavigate,
+}: {
+  repo: Repo;
+  model: Model;
+  graph: CodeGraph | null;
+  onNavigate?: (path: string) => void;
+}) {
   return (
     <>
       <Title
@@ -1027,23 +1214,40 @@ function Risks({ repo, model }: { repo: Repo; model: Model }) {
         sub={`Heuristics computed specifically for ${repo.owner}/${repo.name}.`}
       />
       <div className="risk-real">
-        {model.risks.map((r) => (
-          <article key={r.title}>
-            <div className="score">{r.score}</div>
-            <div>
-              <span>STRUCTURAL HEURISTIC</span>
-              <h2>{r.title}</h2>
-              <p>{r.detail}</p>
-              {r.file && <code>{r.file}</code>}
-            </div>
-            <b>{r.score > 70 ? "High" : r.score > 45 ? "Medium" : "Low"}</b>
-          </article>
-        ))}
+        {model.risks.map((r) => {
+          const nodes = findRelatedGraphNodes(graph, r.file);
+          return (
+            <article key={r.title}>
+              <div className="score">{r.score}</div>
+              <div>
+                <span>STRUCTURAL HEURISTIC</span>
+                <h2>{r.title}</h2>
+                <p>{r.detail}</p>
+                {r.file && (
+                  <code
+                    style={{ cursor: onNavigate ? "pointer" : "default" }}
+                    onClick={() => onNavigate?.(r.file!)}
+                  >
+                    {r.file} {nodes.length > 0 ? `(${nodes.length} graph nodes)` : ""}
+                  </code>
+                )}
+              </div>
+              <b>{r.score > 70 ? "High" : r.score > 45 ? "Medium" : "Low"}</b>
+            </article>
+          );
+        })}
       </div>
     </>
   );
 }
-function Recommendations({ model }: { repo: Repo; model: Model }) {
+function Recommendations({
+  model,
+  onNavigate,
+}: {
+  repo: Repo;
+  model: Model;
+  onNavigate?: (path: string) => void;
+}) {
   return (
     <>
       <Title
@@ -1059,7 +1263,9 @@ function Recommendations({ model }: { repo: Repo; model: Model }) {
               <h2>{r.title}</h2>
               <p>{r.reason}</p>
             </div>
-            <button>Review evidence →</button>
+            <button onClick={() => onNavigate?.(model.sourceFiles[0] || "")}>
+              Review evidence →
+            </button>
           </article>
         ))}
       </div>
