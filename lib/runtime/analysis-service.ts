@@ -18,7 +18,7 @@ import type {
   RepositorySnapshotRecord,
 } from "../persistence/analysis-store.ts";
 import { GitHubClientError } from "../providers/github-client.ts";
-import { createCapabilityToken } from "./capability.ts";
+import { createCapabilityToken, verifyCapabilityToken } from "./capability.ts";
 
 export type AnalysisSnapshotIdentity = {
   snapshotId: string;
@@ -168,6 +168,14 @@ async function jobAndSnapshot(analysisId: string, store: AnalysisStore) {
 
 export function createAnalysisService(dependencies: AnalysisServiceDependencies) {
   return {
+    async verifyAccess(analysisId: string, capabilityToken: string): Promise<void> {
+      if (!(await verifyCapabilityToken(dependencies.capabilitySecret, analysisId, capabilityToken))) {
+        const error = new Error("A valid capability token is required.") as Error & { code: string };
+        error.code = "unauthorized";
+        throw error;
+      }
+    },
+
     async create(request: Parameters<typeof createAnalysis>[0]): Promise<CreateAnalysisResponse> {
       try {
         const { job, snapshot } = await createAnalysis(request, dependencies.pipeline);

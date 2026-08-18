@@ -6,42 +6,34 @@ import {
   extractRationaleComments,
   enrichCodeGraphWithExternalKnowledge,
 } from "../lib/analysis/external-knowledge.ts";
-import type { CodeGraphV2, SchemaNodeMetadata } from "../lib/domain/code-graph.ts";
+import { codeGraphLimits, type CodeGraphV2, type SchemaNodeMetadata } from "../lib/domain/code-graph.ts";
+import { repositorySnapshotLimits } from "../lib/domain/repository-snapshot.ts";
 
 const sampleBaseGraph: CodeGraphV2 = {
   schemaVersion: "2.0",
   snapshot: {
-    repository: "owner/repo",
+    snapshotId: "snapshot-1",
+    provider: "github",
+    repositoryId: "github:owner/repo",
     requestedRef: "main",
     commitSha: "a".repeat(40),
     treeSha: "b".repeat(40),
-    createdAt: new Date().toISOString(),
-    inventory: [],
-    limits: { maxFiles: 1000, maxFileSizeBytes: 1000000, maxTotalBytes: 50000000 },
+    manifest: [],
+    limits: repositorySnapshotLimits,
     coverage: {
       discoveredFiles: 1,
       analyzedFiles: 1,
       skippedFiles: 0,
       discoveredBytes: 100,
       analyzedBytes: 100,
-      skippedBytes: 0,
       truncated: false,
     },
   },
-  limits: {
-    maxNodes: 100,
-    maxEdges: 500,
-    maxEvidencePerEdge: 5,
-    maxDiagnostics: 10,
-    maxCandidatesPerAmbiguity: 5,
-  },
+  limits: codeGraphLimits,
   coverage: {
-    discoveredFiles: 1,
     analyzedFiles: 1,
-    skippedFiles: 0,
-    discoveredBytes: 100,
-    analyzedBytes: 100,
-    skippedBytes: 0,
+    totalFiles: 1,
+    percentage: 100,
     truncated: false,
   },
   metrics: {

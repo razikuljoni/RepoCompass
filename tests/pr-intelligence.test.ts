@@ -1,53 +1,40 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { analyzePRImpact, type PRFileChange } from "../lib/analysis/pr-intelligence.ts";
-import type { CodeGraphV2 } from "../lib/domain/code-graph.ts";
+import { codeGraphLimits, type CodeGraphV2 } from "../lib/domain/code-graph.ts";
+import { repositorySnapshotLimits } from "../lib/domain/repository-snapshot.ts";
 
 const sampleGraph: CodeGraphV2 = {
   schemaVersion: "2.0",
   snapshot: {
-    repository: "owner/repo",
+    snapshotId: "snapshot-1",
+    provider: "github",
+    repositoryId: "github:owner/repo",
     requestedRef: "main",
     commitSha: "a".repeat(40),
     treeSha: "b".repeat(40),
-    createdAt: new Date().toISOString(),
-    inventory: [],
-    limits: { maxFiles: 1000, maxFileSizeBytes: 1000000, maxTotalBytes: 50000000 },
+    manifest: [],
+    limits: repositorySnapshotLimits,
     coverage: {
       discoveredFiles: 3,
       analyzedFiles: 3,
       skippedFiles: 0,
       discoveredBytes: 1000,
       analyzedBytes: 1000,
-      skippedBytes: 0,
       truncated: false,
     },
   },
-  limits: {
-    maxNodes: 100,
-    maxEdges: 500,
-    maxEvidencePerEdge: 5,
-    maxDiagnostics: 10,
-    maxCandidatesPerAmbiguity: 5,
-  },
+  limits: codeGraphLimits,
   coverage: {
-    discoveredFiles: 3,
     analyzedFiles: 3,
-    skippedFiles: 0,
-    discoveredBytes: 1000,
-    analyzedBytes: 1000,
-    skippedBytes: 0,
+    totalFiles: 3,
+    percentage: 100,
     truncated: false,
   },
   metrics: {
-    fileNodeCount: 3,
-    symbolNodeCount: 2,
-    packageNodeCount: 0,
-    routeNodeCount: 1,
-    schemaNodeCount: 0,
-    totalNodeCount: 6,
-    totalEdgeCount: 4,
-    maxDepth: 2,
+    nodeCount: 6,
+    edgeCount: 4,
+    diagnosticCount: 0,
   },
   diagnostics: [],
   nodes: [
@@ -100,7 +87,7 @@ const sampleGraph: CodeGraphV2 = {
       from: "file:src/server.ts",
       to: "file:src/auth.ts",
       kind: "imports",
-      provenance: { method: "ast", rule: "ts" },
+      provenance: "EXTRACTED",
       evidence: [],
     },
     {
@@ -108,7 +95,7 @@ const sampleGraph: CodeGraphV2 = {
       from: "route:src/server.ts:POST:/api/login",
       to: "symbol:src/auth.ts:login",
       kind: "calls",
-      provenance: { method: "ast", rule: "ts" },
+      provenance: "EXTRACTED",
       evidence: [],
     },
     {
@@ -116,7 +103,7 @@ const sampleGraph: CodeGraphV2 = {
       from: "file:tests/auth.test.ts",
       to: "file:src/auth.ts",
       kind: "tests",
-      provenance: { method: "ast", rule: "ts" },
+      provenance: "EXTRACTED",
       evidence: [],
     },
   ],

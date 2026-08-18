@@ -13,6 +13,10 @@ function escapeMermaid(text: string): string {
   return text.replace(/["\\]/g, "\\$&").replace(/\n/g, " ");
 }
 
+function repositoryLabel(repositoryId: string): string {
+  return repositoryId.startsWith("github:") ? repositoryId.slice("github:".length) : repositoryId;
+}
+
 export function codeGraphToMermaid(graph: CodeGraph, maxEdges = 50): string {
   const current = graph && v2(graph);
   if (!current) return "graph TD\n  empty[Empty or invalid graph]";
@@ -62,29 +66,34 @@ export function codeGraphToReport(graph: CodeGraph): string {
   const health = overviewGraphHealth(current);
   const arch = architectureGraphSummary(current);
   const mermaid = codeGraphToMermaid(current, 30);
+  const symbolCount = current.nodes.filter((node) => node.kind === "symbol").length;
+  const routeCount = current.nodes.filter((node) => node.kind === "route").length;
+  const packageCount = current.nodes.filter((node) => node.kind === "package").length;
+  const hubs = arch?.hubs ?? [];
 
   const lines: string[] = [
     `# CodeGraph Analysis Report`,
     ``,
-    `**Repository:** \`${current.snapshot.repository.owner}/${current.snapshot.repository.name}\``,
+    `**Repository:** \`${repositoryLabel(current.snapshot.repositoryId)}\``,
     `**Commit:** \`${current.snapshot.commitSha}\``,
     `**Schema:** \`v${current.schemaVersion}\``,
     health
-      ? `**Health Score:** \`${health.score}/100\` (${health.coverage.analyzedFiles} analyzed, ${health.coverage.skippedFiles} skipped)`
+      ? `**Health Score:** \`${health.healthScore}/100\` (${health.coverage.analyzedFiles} analyzed, ${health.coverage.skippedFiles} skipped)`
       : "",
     ``,
     `## Summary Metrics`,
     ``,
-    `- **Files:** ${current.metrics.files}`,
-    `- **Symbols:** ${current.metrics.symbols}`,
-    `- **Routes:** ${current.metrics.routes}`,
-    `- **Packages:** ${current.metrics.packages}`,
-    `- **Total Edges:** ${current.edges.length}`,
+    `- **Nodes:** ${current.metrics.nodeCount}`,
+    `- **Symbols:** ${symbolCount}`,
+    `- **Routes:** ${routeCount}`,
+    `- **Packages:** ${packageCount}`,
+    `- **Edges:** ${current.metrics.edgeCount}`,
+    `- **Diagnostics:** ${current.metrics.diagnosticCount}`,
     ``,
     `## Hub Modules`,
     ``,
-    ...(arch.hubs.length
-      ? arch.hubs.map(
+    ...(hubs.length
+      ? hubs.map(
           (h) => `- \`${h.path}\` (${h.total} connections: ${h.fanIn} in / ${h.fanOut} out)`,
         )
       : ["- No hub modules detected."]),
@@ -113,7 +122,7 @@ export function codeGraphToHtml(graph: CodeGraph): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>CodeGraph - ${current.snapshot.repository.name}</title>
+  <title>CodeGraph - ${repositoryLabel(current.snapshot.repositoryId)}</title>
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; background: #0f172a; color: #f8fafc; }
     h1, h2 { border-bottom: 1px solid #334155; padding-bottom: 8px; }
@@ -126,11 +135,11 @@ export function codeGraphToHtml(graph: CodeGraph): string {
   </style>
 </head>
 <body>
-  <h1>CodeGraph Report &mdash; ${current.snapshot.repository.owner}/${current.snapshot.repository.name}</h1>
+  <h1>CodeGraph Report &mdash; ${repositoryLabel(current.snapshot.repositoryId)}</h1>
   <div class="card">
     <h2>Snapshot Information</h2>
     <p><strong>Commit:</strong> <code>${current.snapshot.commitSha}</code></p>
-    <p><strong>Files:</strong> ${current.metrics.files} | <strong>Symbols:</strong> ${current.metrics.symbols} | <strong>Edges:</strong> ${current.edges.length}</p>
+    <p><strong>Nodes:</strong> ${current.metrics.nodeCount} | <strong>Edges:</strong> ${current.metrics.edgeCount} | <strong>Diagnostics:</strong> ${current.metrics.diagnosticCount}</p>
   </div>
   <div class="card">
     <h2>Nodes (${current.nodes.length})</h2>

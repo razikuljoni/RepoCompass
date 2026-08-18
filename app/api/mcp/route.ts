@@ -1,4 +1,6 @@
+import { env } from "cloudflare:workers";
 import { handleMcpRequest, type JsonRpcRequest } from "@/lib/mcp/mcp-server";
+import { createAnalysisDependencies } from "@/lib/runtime/analysis-factory";
 import { parseCapabilityTokenFromHeader } from "@/lib/runtime/analysis-http";
 import { createAnalysisService } from "@/lib/runtime/analysis-service";
 
@@ -46,7 +48,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const service = createAnalysisService();
+  const service = createAnalysisService(createAnalysisDependencies(env));
   try {
     await service.verifyAccess(analysisId, token);
     const resultResponse = await service.result(analysisId);

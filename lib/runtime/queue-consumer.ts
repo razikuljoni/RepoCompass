@@ -37,7 +37,7 @@ function failure(error: unknown): AnalysisJobError | null {
   }
   if (error.code === "rate_limited") {
     return {
-      code: "rate_limited",
+      code: "github_rate_limited",
       message: "GitHub API rate limit exceeded. Configure GITHUB_TOKEN in Worker secrets.",
       retryable: false,
     };
@@ -92,7 +92,7 @@ export function createAnalysisQueueConsumer(dependencies: JobPipelineDependencie
             if (currentJob && currentJob.attemptCount >= 3) {
               const msg =
                 error instanceof Error ? error.message : "Analysis failed after maximum retries.";
-              jobError = { code: "max_attempts_exceeded", message: msg, retryable: false };
+              jobError = { code: "analysis_failed", message: msg, retryable: false };
             }
           }
           if (!jobError) {

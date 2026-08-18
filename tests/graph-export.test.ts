@@ -5,22 +5,33 @@ import {
   codeGraphToReport,
   codeGraphToHtml,
 } from "../lib/analysis/graph-export.ts";
-import type { CodeGraphV2 } from "../lib/domain/code-graph.ts";
+import { codeGraphLimits, type CodeGraphV2 } from "../lib/domain/code-graph.ts";
+import { repositorySnapshotLimits } from "../lib/domain/repository-snapshot.ts";
 
 function sampleGraph(): CodeGraphV2 {
   return {
     schemaVersion: "2.0",
     snapshot: {
+      snapshotId: "snapshot-1",
       provider: "github",
-      repository: { owner: "owner", name: "repo" },
+      repositoryId: "github:owner/repo",
       requestedRef: "main",
       commitSha: "1111111111111111111111111111111111111111",
       treeSha: "2222222222222222222222222222222222222222",
       manifest: [],
+      limits: repositorySnapshotLimits,
+      coverage: {
+        discoveredFiles: 2,
+        analyzedFiles: 2,
+        skippedFiles: 0,
+        discoveredBytes: 0,
+        analyzedBytes: 0,
+        truncated: false,
+      },
     },
-    limits: { maxFiles: 100, maxSizeBytes: 100000, maxTotalBytes: 5000000 },
-    coverage: { discoveredFiles: 2, analyzedFiles: 2, skippedFiles: 0, truncation: false },
-    metrics: { files: 2, symbols: 1, routes: 1, packages: 0 },
+    limits: codeGraphLimits,
+    coverage: { analyzedFiles: 2, totalFiles: 2, percentage: 100, truncated: false },
+    metrics: { nodeCount: 3, edgeCount: 2, diagnosticCount: 0 },
     diagnostics: [],
     nodes: [
       {
@@ -51,7 +62,7 @@ function sampleGraph(): CodeGraphV2 {
         from: "node-file-1",
         to: "node-file-2",
         kind: "imports",
-        provenance: { extractor: "ts", extractorVersion: "1.0", ruleId: "import" },
+        provenance: "EXTRACTED",
         evidence: [{ path: "src/app.ts", startLine: 1 }],
       },
       {
@@ -59,7 +70,7 @@ function sampleGraph(): CodeGraphV2 {
         from: "node-sym-1",
         to: "node-file-2",
         kind: "calls",
-        provenance: { extractor: "ts", extractorVersion: "1.0", ruleId: "call" },
+        provenance: "EXTRACTED",
         evidence: [{ path: "src/app.ts", startLine: 5 }],
       },
     ],

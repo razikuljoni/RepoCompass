@@ -1,4 +1,6 @@
+import { env } from "cloudflare:workers";
 import type { PRFileChange } from "@/lib/analysis/pr-intelligence";
+import { createAnalysisDependencies } from "@/lib/runtime/analysis-factory";
 import { parseCapabilityTokenFromHeader } from "@/lib/runtime/analysis-http";
 import { createAnalysisService } from "@/lib/runtime/analysis-service";
 
@@ -38,7 +40,7 @@ export async function POST(
   }
 
   const changes = body.changes as PRFileChange[];
-  const service = createAnalysisService();
+  const service = createAnalysisService(createAnalysisDependencies(env));
   try {
     await service.verifyAccess(analysisId, token);
     const report = await service.prImpact(analysisId, changes);

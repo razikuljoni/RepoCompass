@@ -523,7 +523,10 @@ function ImportPanel({ onImported }: { onImported: (data: ImportedRepository) =>
   );
 }
 
-function remotePayload(result: AnalysisResult, analysisAccess: AnalysisAccess): ImportedRepository {
+function remotePayload(
+  result: AnalysisResultResponse["result"],
+  analysisAccess: AnalysisAccess,
+): ImportedRepository {
   const { repository, snapshot, model, coverage } = result;
   return {
     repo: {
@@ -1553,12 +1556,12 @@ function Evolution({ repo, model, graph }: { repo: Repo; model: Model; graph?: C
         />
         <Metric
           label="Symbols"
-          value={String(g ? g.metrics.symbols : (model.symbols || []).length)}
+          value={String(g ? g.nodes.filter((node) => node.kind === "symbol").length : (model.symbols || []).length)}
           note={g ? "CodeGraph v2.0" : "Current snapshot"}
         />
         <Metric
           label="Routes"
-          value={String(g ? g.metrics.routes : (model.routes || []).length)}
+          value={String(g ? g.nodes.filter((node) => node.kind === "route").length : (model.routes || []).length)}
           note={g ? "CodeGraph v2.0" : "Current snapshot"}
         />
         <Metric

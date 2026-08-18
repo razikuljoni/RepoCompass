@@ -65,7 +65,7 @@ export function extractMarkdownKnowledge(path: string, content: string): Extract
         from: docNodeId,
         to: sectionNodeId,
         kind: "contains",
-        provenance: { method: "doc-extractor", rule: "markdown-heading" },
+        provenance: "EXTRACTED",
         evidence: [{ path, startLine: index + 1 }],
       });
     }
@@ -123,7 +123,7 @@ export function extractSqlSchemaKnowledge(path: string, content: string): Extrac
       from: fileNodeId,
       to: schemaNodeId,
       kind: "declares",
-      provenance: { method: "schema-extractor", rule: "sql-create-table" },
+      provenance: "EXTRACTED",
       evidence: [{ path, startLine: line }],
     });
   }
@@ -209,7 +209,7 @@ export function enrichCodeGraphWithExternalKnowledge(
           from: fileNodeId,
           to: rationaleNodeId,
           kind: "contains",
-          provenance: { method: "comment-extractor", rule: r.kind.toLowerCase() },
+          provenance: "EXTRACTED",
           evidence: [{ path: input.path, startLine: r.line }],
         });
       }

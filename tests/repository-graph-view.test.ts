@@ -129,7 +129,7 @@ test("overviewGraphHealth computes diagnostics, coverage, and score", () => {
 });
 
 test("overviewGraphHealth returns null for v1 graphs", () => {
-  const v1 = { schemaVersion: "1.0", snapshot: graph.snapshot, nodes: [], edges: [] };
+  const v1 = { schemaVersion: "1.0" as const, snapshot: graph.snapshot, nodes: [], edges: [] };
   assert.strictEqual(overviewGraphHealth(v1), null);
 });
 

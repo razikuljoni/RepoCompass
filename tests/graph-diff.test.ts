@@ -1,7 +1,8 @@
 import assert from "node:assert";
 import { test } from "node:test";
 import { compareCodeGraphs } from "../lib/analysis/graph-diff.ts";
-import type { CodeGraphV2 } from "../lib/domain/code-graph.ts";
+import { codeGraphLimits, type CodeGraphV2 } from "../lib/domain/code-graph.ts";
+import { repositorySnapshotLimits } from "../lib/domain/repository-snapshot.ts";
 
 function createGraph(
   files: string[],
@@ -11,21 +12,35 @@ function createGraph(
   return {
     schemaVersion: "2.0",
     snapshot: {
+      snapshotId: "snapshot-1",
       provider: "github",
-      repository: { owner: "owner", name: "repo" },
+      repositoryId: "github:owner/repo",
       requestedRef: "main",
       commitSha: "1111111111111111111111111111111111111111",
       treeSha: "2222222222222222222222222222222222222222",
       manifest: [],
+      limits: repositorySnapshotLimits,
+      coverage: {
+        discoveredFiles: files.length,
+        analyzedFiles: files.length,
+        skippedFiles: 0,
+        discoveredBytes: 0,
+        analyzedBytes: 0,
+        truncated: false,
+      },
     },
-    limits: { maxFiles: 100, maxSizeBytes: 100000, maxTotalBytes: 5000000 },
+    limits: codeGraphLimits,
     coverage: {
-      discoveredFiles: files.length,
       analyzedFiles: files.length,
-      skippedFiles: 0,
-      truncation: false,
+      totalFiles: files.length,
+      percentage: files.length > 0 ? 100 : 0,
+      truncated: false,
     },
-    metrics: { files: files.length, symbols: symbols.length, routes: routes.length, packages: 0 },
+    metrics: {
+      nodeCount: files.length + symbols.length + routes.length,
+      edgeCount: 0,
+      diagnosticCount: 0,
+    },
     diagnostics: [],
     nodes: [
       ...files.map((f) => ({
