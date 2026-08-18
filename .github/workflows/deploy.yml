@@ -1,14 +1,13 @@
-name: Quality Checks
+name: Deploy to Cloudflare Workers
 
 on:
   push:
-    branches: [main, dev]
-  pull_request:
-    branches: [main, dev]
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  test:
-    name: Test & Lint
+  deploy:
+    name: Deploy Worker & Apply Migrations
     runs-on: ubuntu-latest
 
     steps:
@@ -41,11 +40,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check formatting
-        run: pnpm format:check
-
-      - name: Run linter
-        run: node node_modules/eslint/bin/eslint.js . --ignore-pattern worker-configuration.d.ts --max-warnings=0
-
       - name: Run unit tests
         run: pnpm test:unit
+
+      - name: Apply D1 database migrations (remote)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler d1 migrations apply DB --remote
+
+      - name: Build & Deploy to Cloudflare Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm deploy

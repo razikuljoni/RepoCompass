@@ -2,6 +2,7 @@ import { sha256 } from "../persistence/artifact-store.ts";
 import { D1AnalysisStore, type D1Binding } from "../persistence/d1-analysis-store.ts";
 import { R2ArtifactStore, type R2Binding } from "../persistence/r2-artifact-store.ts";
 import { createGitHubClient } from "../providers/github-client.ts";
+import { analysisQueueRuntime } from "./analysis-queue.ts";
 
 export type AnalysisEnvironment = {
   DB: D1Binding;
@@ -34,16 +35,30 @@ export function createAnalysisDependencies(env: AnalysisEnvironment) {
     }),
     queue: {
       send: async (message: unknown) => {
-        console.log(
-          "SENDING QUEUE MSG:",
-          JSON.stringify(message),
-          "HAS_QUEUE:",
-          Boolean(env.ANALYSIS_QUEUE?.send),
-        );
         if (env.ANALYSIS_QUEUE?.send) {
           await env.ANALYSIS_QUEUE.send(message);
-        } else {
-          console.error("ANALYSIS_QUEUE BINDING MISSING OR NO SEND METHOD!");
+        }
+        if (typeof process !== "undefined" && process.env.NODE_ENV !== "production") {
+          setTimeout(() => {
+            const batch = {
+              queue: "repo-compass-analysis-production",
+              messages: [
+                {
+                  id: `dev-${Date.now()}`,
+                  body: message,
+                  attempts: 1,
+                  timestamp: new Date(),
+                  ack() {},
+                  retry() {},
+                },
+              ],
+              ackAll() {},
+              retryAll() {},
+            };
+            analysisQueueRuntime.consume(batch, env).catch((error) => {
+              console.error("DEV QUEUE CONSUMER ERROR:", error);
+            });
+          }, 0);
         }
       },
     },

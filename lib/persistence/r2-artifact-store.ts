@@ -38,9 +38,8 @@ export class R2ArtifactStore implements ArtifactStore {
       return existing;
     }
     console.log("R2 CALLING BUCKET.PUT:", key);
-    let result: unknown = null;
     try {
-      result = await this.bucket.put(key, storedBytes, {
+      await this.bucket.put(key, storedBytes, {
         customMetadata: { sha256: hash },
       });
     } catch (r2Err) {
