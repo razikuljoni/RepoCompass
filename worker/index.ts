@@ -30,7 +30,14 @@ const worker: ExportedHandler<Cloudflare.Env> = {
     return handler.fetch(request, env, ctx);
   },
   async queue(batch, env): Promise<void> {
-    await analysisQueueRuntime.consume(batch, env);
+    console.log("[WORKER QUEUE HANDLER RECEIVED BATCH]", batch?.messages?.length);
+    try {
+      await analysisQueueRuntime.consume(batch, env);
+      console.log("[WORKER QUEUE HANDLER CONSUMED OK]");
+    } catch (err) {
+      console.error("[WORKER QUEUE HANDLER ERROR]", err);
+      throw err;
+    }
   },
 };
 
