@@ -234,7 +234,7 @@ export default function Home() {
               onNavigate={(p) => navigateToFile(p, "explorer")}
             />
           )}{" "}
-          {view === "evolution" && <Evolution repo={repo} model={model} />}{" "}
+          {view === "evolution" && <Evolution repo={repo} model={model} graph={graph} />}{" "}
           {view === "glossary" && <Glossary repo={repo} model={model} />}{" "}
           {view === "integrations" && (
             <Integrations onImport={() => setImporting(true)} repo={repo} />
@@ -1513,7 +1513,8 @@ function AskRepo({
   );
 }
 
-function Evolution({ repo, model }: { repo: Repo; model: Model }) {
+function Evolution({ repo, model, graph }: { repo: Repo; model: Model; graph?: CodeGraph | null }) {
+  const g = graph?.schemaVersion === "2.0" ? graph : null;
   return (
     <>
       <Title
@@ -1544,20 +1545,24 @@ function Evolution({ repo, model }: { repo: Repo; model: Model }) {
       <div className="dmetrics">
         <Metric
           label="Import edges"
-          value={String((model.edges || []).length)}
-          note="Current snapshot"
+          value={String(g ? g.edges.length : (model.edges || []).length)}
+          note={g ? "CodeGraph v2.0" : "Current snapshot"}
         />
         <Metric
           label="Symbols"
-          value={String((model.symbols || []).length)}
-          note="Current snapshot"
+          value={String(g ? g.metrics.symbols : (model.symbols || []).length)}
+          note={g ? "CodeGraph v2.0" : "Current snapshot"}
         />
         <Metric
-          label="Dependencies"
-          value={String((model.dependencies || []).length)}
-          note="Current snapshot"
+          label="Routes"
+          value={String(g ? g.metrics.routes : (model.routes || []).length)}
+          note={g ? "CodeGraph v2.0" : "Current snapshot"}
         />
-        <Metric label="Snapshots" value="1" note="Drift needs 2+" />
+        <Metric
+          label="Snapshots"
+          value={g ? `1 (${g.snapshot.commitSha.slice(0, 7)})` : "1"}
+          note="Drift needs 2+ snapshots"
+        />
       </div>
     </>
   );

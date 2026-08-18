@@ -1,4 +1,5 @@
 import { parseAnalysisResult, type AnalysisResult } from "../analysis/analysis-result-contract.ts";
+import { compareCodeGraphs } from "../analysis/graph-diff.ts";
 import {
   codeGraphToHtml,
   codeGraphToMermaid,
@@ -277,6 +278,19 @@ export function createAnalysisService(dependencies: AnalysisServiceDependencies)
         snapshot: response.result.graph.snapshot,
         answer: answerRepositoryQuestion(response.result.graph, question),
       };
+    },
+
+    async compareGraphWith(baseAnalysisId: string, targetAnalysisId: string) {
+      const baseResponse = await this.result(baseAnalysisId);
+      if (!baseResponse.result.graph)
+        throw new AnalysisServiceError("result_unavailable", "Base analysis graph is unavailable.");
+      const targetResponse = await this.result(targetAnalysisId);
+      if (!targetResponse.result.graph)
+        throw new AnalysisServiceError(
+          "result_unavailable",
+          "Target analysis graph is unavailable.",
+        );
+      return compareCodeGraphs(baseResponse.result.graph, targetResponse.result.graph);
     },
   };
 }
