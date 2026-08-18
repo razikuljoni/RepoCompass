@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { contentModel } from "@/lib/analysis/content-model";
 import { codeExtensions, extensionOf } from "@/lib/analysis/file-classification";
 import type { AnalysisResult } from "@/lib/analysis/analysis-result-contract";
+import type { CodeGraph } from "@/lib/domain/code-graph";
 import type { Repo } from "@/lib/domain/repository";
 import type { Model } from "@/lib/domain/repository-model";
 import type {
@@ -11,7 +12,7 @@ import type {
   CreateAnalysisResponse,
 } from "@/lib/runtime/analysis-service";
 
-type ImportedRepository = { repo: Repo; model?: Model };
+type ImportedRepository = { repo: Repo; model?: Model; graph?: CodeGraph };
 type ApiErrorResponse = { error: { code: string; message: string } };
 type BusyStatus = Pick<AnalysisStatusResponse, "status" | "stage" | "progress">;
 
@@ -66,6 +67,7 @@ function bytes(value: number) {
 export default function Home() {
   const [repo, setRepo] = useState<Repo | null>(null),
     [serverModel, setServerModel] = useState<Model | null>(null),
+    [graph, setGraph] = useState<CodeGraph | null>(null),
     [view, setView] = useState<View>("overview"),
     [importing, setImporting] = useState(false);
   const model = useMemo(
@@ -75,6 +77,7 @@ export default function Home() {
   function importRepository(data: ImportedRepository) {
     setRepo(data.repo);
     setServerModel(data.model || null);
+    setGraph(data.graph || null);
     setView("overview");
   }
   if (!repo || !model) return <EmptyState onImported={importRepository} />;
@@ -149,7 +152,7 @@ export default function Home() {
           </div>
         </header>
         <div className="dynamic-content">
-          {view === "overview" && <Overview repo={repo} model={model} />}{" "}
+          {view === "overview" && <Overview repo={repo} model={model} graph={graph} />}{" "}
           {view === "explorer" && <Explorer repo={repo} model={model} />}{" "}
           {view === "impact" && <Impact repo={repo} model={model} />}{" "}
           {view === "ask" && <AskRepo repo={repo} model={model} />}{" "}
@@ -458,6 +461,7 @@ function remotePayload(result: AnalysisResult): ImportedRepository {
       source: "remote",
     },
     model,
+    graph: result.graph,
   };
 }
 
@@ -470,7 +474,7 @@ function Title({ k, title, sub }: { k: string; title: string; sub: string }) {
     </div>
   );
 }
-function Overview({ repo, model }: { repo: Repo; model: Model }) {
+function Overview({ repo, model, graph }: { repo: Repo; model: Model; graph: CodeGraph | null }) {
   return (
     <>
       <Title
@@ -498,9 +502,13 @@ function Overview({ repo, model }: { repo: Repo; model: Model }) {
           note={model.testFiles.length ? "Detected by path" : "None detected"}
         />
         <Metric
-          label="Top area"
-          value={model.topDirs[0]?.name || "root"}
-          note={`${model.topDirs[0]?.count || 0} indexed paths`}
+          label={graph ? "Graph nodes" : "Top area"}
+          value={graph ? graph.nodes.length.toLocaleString() : model.topDirs[0]?.name || "root"}
+          note={
+            graph
+              ? `${graph.edges.length.toLocaleString()} relationships`
+              : `${model.topDirs[0]?.count || 0} indexed paths`
+          }
         />
       </div>
       <div className="dash-grid">

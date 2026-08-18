@@ -1,4 +1,6 @@
 import { parseAnalysisResult, type AnalysisResult } from "../analysis/analysis-result-contract.ts";
+import { canonicalGraphJson, executeGraphQuery } from "../analysis/graph-query-engine.ts";
+import type { GraphQuery } from "../analysis/graph-query-contract.ts";
 import type { AnalysisJobStage, AnalysisJobStatus } from "../domain/analysis-job.ts";
 import { createAnalysis, type JobPipelineDependencies } from "../jobs/pipeline.ts";
 import { decodeJson, sha256 } from "../persistence/artifact-store.ts";
@@ -200,6 +202,28 @@ export function createAnalysisService(dependencies: AnalysisServiceDependencies)
         if (error instanceof AnalysisServiceError) throw error;
         throw new AnalysisServiceError("result_invalid", "Analysis result failed validation.");
       }
+    },
+
+    async graphQuery(analysisId: string, query: GraphQuery) {
+      const response = await this.result(analysisId);
+      if (!response.result.graph)
+        throw new AnalysisServiceError("result_unavailable", "Analysis graph is unavailable.");
+      return {
+        analysisId,
+        snapshot: response.result.graph.snapshot,
+        graphSchemaVersion: response.result.graph.schemaVersion,
+        coverage: "coverage" in response.result.graph ? response.result.graph.coverage : null,
+        diagnostics:
+          "diagnostics" in response.result.graph ? response.result.graph.diagnostics : [],
+        result: executeGraphQuery(response.result.graph, query),
+      };
+    },
+
+    async graphJson(analysisId: string): Promise<string> {
+      const response = await this.result(analysisId);
+      if (!response.result.graph)
+        throw new AnalysisServiceError("result_unavailable", "Analysis graph is unavailable.");
+      return canonicalGraphJson(response.result.graph);
     },
   };
 }

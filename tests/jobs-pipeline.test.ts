@@ -123,7 +123,10 @@ test("successful analysis persists a canonical v2 graph and compatibility model"
   const current = fixture(2);
   const files = new Map([
     ["src/a.ts", "export function alpha() {}\n"],
-    ["src/b.ts", "import { alpha } from './a';\nexport const beta = alpha();\n"],
+    [
+      "src/b.ts",
+      "import { alpha } from './a';\nimport express from 'express';\nexport const beta = alpha();\napp.get('/health', beta);\n",
+    ],
   ]);
   current.dependencies.github = {
     ...current.dependencies.github,
@@ -154,6 +157,18 @@ test("successful analysis persists a canonical v2 graph and compatibility model"
   assert.equal(result.graph?.schemaVersion, "2.0");
   assert.deepStrictEqual(result.graph?.snapshot, result.snapshot);
   assert.deepStrictEqual(result.model.sourceFiles, ["src/a.ts", "src/b.ts"]);
+  assert.deepStrictEqual(result.model.edges, [
+    { from: "src/b.ts", to: "./a", kind: "import" },
+    { from: "src/b.ts", to: "express", kind: "import" },
+  ]);
+  assert.deepStrictEqual(result.model.dependencies, ["express"]);
+  assert.equal(
+    result.model.symbols?.some((symbol) => symbol.name === "alpha"),
+    true,
+  );
+  assert.deepStrictEqual(result.model.routes, [
+    { method: "GET", path: "/health", file: "src/b.ts" },
+  ]);
   assert.deepStrictEqual(
     result.graph?.nodes
       .filter((node) => node.kind === "file")
@@ -182,9 +197,9 @@ test("successful analysis persists a canonical v2 graph and compatibility model"
         name: "beta",
         evidence: {
           path: "src/b.ts",
-          startLine: 2,
+          startLine: 3,
           startColumn: 14,
-          endLine: 2,
+          endLine: 3,
           endColumn: 28,
         },
       },

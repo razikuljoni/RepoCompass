@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractTypeScriptCodeGraph } from "../lib/analysis/typescript-code-graph-extractor.ts";
+import { dispatchCodeGraphParser } from "../lib/analysis/code-graph-parser.ts";
+import {
+  extractTypeScriptCodeGraph,
+  typeScriptCodeGraphParser,
+} from "../lib/analysis/typescript-code-graph-extractor.ts";
 import { parseCodeGraph } from "../lib/analysis/code-graph-contract.ts";
 import {
   repositorySnapshotLimits,
@@ -50,6 +54,14 @@ function symbols(graph: ReturnType<typeof extractTypeScriptCodeGraph>): Map<stri
       .map((node) => [node.name, node.metadata.symbolKind]),
   );
 }
+
+test("dispatches TypeScript extraction through the language-neutral parser contract", () => {
+  const input = fixture({ "src/main.ts": "export const value = 1" });
+  assert.deepStrictEqual(
+    dispatchCodeGraphParser(input, [typeScriptCodeGraphParser]),
+    extractTypeScriptCodeGraph(input),
+  );
+});
 
 test("extracts declarations and containment with strict deterministic evidence", () => {
   const input = fixture({
@@ -177,6 +189,75 @@ test("resolves commented tsconfig aliases with deterministic pattern and target 
   assert.equal(target?.kind, "file");
   assert.equal(target?.location?.path, "core/value.ts");
   assert.deepStrictEqual(edge?.metadata?.candidates, ["core/value.ts"]);
+});
+
+test("emits deterministic ambiguous resolution when multiple repository candidates are valid", () => {
+  const input = fixture({
+    "src/main.ts": `import { value } from "./value"`,
+    "src/value.ts": "export const value = 1",
+    "src/value.tsx": "export const value = 2",
+  });
+  const first = extractTypeScriptCodeGraph(input);
+  const second = extractTypeScriptCodeGraph({
+    snapshot: { ...input.snapshot, manifest: [...input.snapshot.manifest].reverse() },
+    files: [...input.files].reverse(),
+  });
+  const edge = first.edges.find(
+    (item) => item.kind === "imports" && item.metadata?.specifier === "./value",
+  );
+  assert.deepStrictEqual(second, first);
+  assert.equal(edge?.provenance, "AMBIGUOUS");
+  assert.equal(edge?.metadata?.resolution, "ambiguous");
+  assert.deepStrictEqual(edge?.metadata?.candidates, ["src/value.ts", "src/value.tsx"]);
+  assert.ok(
+    first.nodes.some((node) => node.kind === "package" && node.name === "ambiguous:./value"),
+  );
+  assert.ok(first.diagnostics.some((item) => item.code === "MODULE_AMBIGUOUS"));
+  assert.deepStrictEqual(parseCodeGraph(first), first);
+});
+
+test("collects valid alias targets before reporting ambiguous resolution", () => {
+  const graph = extractTypeScriptCodeGraph(
+    fixture({
+      "tsconfig.json": `{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*","generated/*"]}}}`,
+      "src/main.ts": `import { value } from "@/value"`,
+      "src/value.ts": "export const value = 1",
+      "generated/value.ts": "export const value = 2",
+    }),
+  );
+  const edge = graph.edges.find(
+    (item) => item.kind === "imports" && item.metadata?.specifier === "@/value",
+  );
+  assert.equal(edge?.metadata?.resolution, "ambiguous");
+  assert.deepStrictEqual(edge?.metadata?.candidates, ["generated/value.ts", "src/value.ts"]);
+});
+
+test("resolves workspace package exports and subpaths without treating them as external", () => {
+  const graph = extractTypeScriptCodeGraph(
+    fixture({
+      "packages/core/package.json": JSON.stringify({
+        name: "@example/core",
+        exports: { ".": "./src/index.ts", "./feature": "./src/feature.ts" },
+      }),
+      "packages/core/src/index.ts": "export const core = true",
+      "packages/core/src/feature.ts": "export function feature() {}",
+      "apps/web/src/main.ts": `import { core } from "@example/core"
+import { feature } from "@example/core/feature"
+feature()`,
+    }),
+  );
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const imports = graph.edges.filter((edge) => edge.kind === "imports");
+  assert.deepStrictEqual(imports.map((edge) => nodeById.get(edge.to)?.location?.path).sort(), [
+    "packages/core/src/feature.ts",
+    "packages/core/src/index.ts",
+  ]);
+  assert.ok(imports.every((edge) => edge.metadata?.resolution === "resolved"));
+  assert.equal(
+    graph.nodes.some((node) => node.kind === "package" && node.name === "@example/core"),
+    false,
+  );
+  assert.ok(graph.edges.some((edge) => edge.kind === "calls"));
 });
 
 test("extracts Next root, grouped, parallel, page routes and only exported handlers", () => {

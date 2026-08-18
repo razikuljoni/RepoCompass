@@ -1,5 +1,7 @@
-import { contentModel } from "../analysis/content-model.ts";
-import { extractTypeScriptCodeGraph } from "../analysis/typescript-code-graph-extractor.ts";
+import { dispatchCodeGraphParser } from "../analysis/code-graph-parser.ts";
+import { buildModel } from "../analysis/build-repository-model.ts";
+import { typeScriptCodeGraphParser } from "../analysis/typescript-code-graph-extractor.ts";
+import { codeGraphToModel } from "../adapters/code-graph-to-model.ts";
 import {
   analysisResultSchemaVersion,
   parseAnalysisResult,
@@ -407,6 +409,9 @@ async function analyze(
     indexedFiles,
     source: "remote",
   };
+  const graph = dispatchCodeGraphParser({ snapshot, files: indexedFiles }, [
+    typeScriptCodeGraphParser,
+  ]);
   const result: AnalysisResult = parseAnalysisResult({
     schemaVersion: analysisResultSchemaVersion,
     analyzerVersion: job.analyzerVersion,
@@ -418,9 +423,9 @@ async function analyze(
       owner: repositoryRecord.owner,
       name: repositoryRecord.name,
     },
-    model: contentModel(repo),
+    model: codeGraphToModel(buildModel(repo), graph),
     coverage: snapshot.coverage,
-    graph: extractTypeScriptCodeGraph({ snapshot, files: indexedFiles }),
+    graph,
   });
   const key = artifactKey("result", `${job.id}.json`);
   const artifact = await dependencies.artifactStore.put(key, encodeJson(result));

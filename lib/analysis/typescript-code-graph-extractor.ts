@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import ts from "typescript";
 import { canonicalizeCodeGraph } from "./canonicalize-code-graph.ts";
+import type { CodeGraphParser, SourceFileInput } from "./code-graph-parser.ts";
 import {
   compareCodeUnits,
   resolveTypeScriptModule,
   type TypeScriptModuleResolutionConfig,
+  type TypeScriptWorkspacePackage,
 } from "./typescript-module-resolution.ts";
 import {
   codeGraphLimits,
@@ -16,7 +18,7 @@ import {
 } from "../domain/code-graph.ts";
 import { parseRepositorySnapshot, type RepositorySnapshot } from "../domain/repository-snapshot.ts";
 
-export type TypeScriptSourceInput = { path: string; content: string };
+export type TypeScriptSourceInput = SourceFileInput;
 export type TypeScriptCodeGraphExtractorInput = {
   snapshot: RepositorySnapshot;
   files: readonly TypeScriptSourceInput[];
@@ -40,6 +42,7 @@ type Context = {
   fileIds: Map<string, string>;
   paths: Set<string>;
   moduleConfigs: TypeScriptModuleResolutionConfig[];
+  workspacePackages: TypeScriptWorkspacePackage[];
   truncated: boolean;
 };
 
@@ -87,6 +90,55 @@ function moduleConfigs(
     configs.push({ path: file.path, baseUrl, paths });
   }
   return configs.sort((left, right) => compareCodeUnits(left.path, right.path));
+}
+
+function packageTargets(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(packageTargets);
+  if (!value || typeof value !== "object") return [];
+  return Object.values(value).flatMap(packageTargets);
+}
+
+function workspacePackages(files: readonly TypeScriptSourceInput[]): TypeScriptWorkspacePackage[] {
+  const packages: TypeScriptWorkspacePackage[] = [];
+  for (const file of files) {
+    if (!/(?:^|\/)package\.json$/.test(file.path)) continue;
+    let manifest: Record<string, unknown>;
+    try {
+      manifest = JSON.parse(file.content) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (typeof manifest.name !== "string") continue;
+    const root = directory(file.path);
+    const entries: Record<string, readonly string[]> = {};
+    if (typeof manifest.exports === "string" || Array.isArray(manifest.exports)) {
+      entries["."] = packageTargets(manifest.exports);
+    } else if (manifest.exports && typeof manifest.exports === "object") {
+      const exported = manifest.exports as Record<string, unknown>;
+      const subpaths = Object.keys(exported).filter((key) => key.startsWith("."));
+      if (subpaths.length) {
+        for (const subpath of subpaths) entries[subpath] = packageTargets(exported[subpath]);
+      } else entries["."] = packageTargets(exported);
+    }
+    if (!entries["."]) {
+      entries["."] = packageTargets(manifest.types ?? manifest.module ?? manifest.main ?? "index");
+    }
+    packages.push({
+      name: manifest.name,
+      root,
+      entries: Object.fromEntries(
+        Object.entries(entries).map(([subpath, targets]) => [
+          subpath,
+          [...new Set(targets.map((target) => target.replace(/^\.\//, "")))].sort(compareCodeUnits),
+        ]),
+      ),
+    });
+  }
+  return packages.sort(
+    (left, right) =>
+      compareCodeUnits(left.name, right.name) || compareCodeUnits(left.root, right.root),
+  );
 }
 
 function hash(value: string): string {
@@ -290,12 +342,18 @@ function importTarget(
     source.fileName,
     context.paths,
     context.moduleConfigs,
+    context.workspacePackages,
   );
   if (resolution.resolvedPath) {
     return { id: context.fileIds.get(resolution.resolvedPath)!, resolution };
   }
   const name = resolution.packageName ?? packageName(specifier);
-  const placeholder = resolution.resolution === "unresolved" ? `unresolved:${specifier}` : name;
+  const placeholder =
+    resolution.resolution === "unresolved"
+      ? `unresolved:${specifier}`
+      : resolution.resolution === "ambiguous"
+        ? `ambiguous:${specifier}`
+        : name;
   const id = identity("package", placeholder);
   addNode(context, {
     id,
@@ -336,6 +394,13 @@ function addImport(
       code: "MODULE_UNRESOLVED",
       severity: "warning",
       message: `Could not resolve module ${specifier}`,
+      location: location(source, node),
+    });
+  } else if (ambiguous) {
+    context.diagnostics.push({
+      code: "MODULE_AMBIGUOUS",
+      severity: "warning",
+      message: `Module ${specifier} has multiple resolution candidates: ${target.resolution.candidates.join(", ")}`,
       location: location(source, node),
     });
   }
@@ -420,6 +485,7 @@ function extractRelationships(source: ts.SourceFile, context: Context): void {
       source.fileName,
       context.paths,
       context.moduleConfigs,
+      context.workspacePackages,
     );
     if (!resolved.resolvedPath) continue;
     const targets = context.symbols.filter((item) => item.path === resolved.resolvedPath);
@@ -611,6 +677,7 @@ function routeHandler(
         source.fileName,
         context.paths,
         context.moduleConfigs,
+        context.workspacePackages,
       );
       const importedName = (element.propertyName ?? element.name).text;
       return context.symbols.find(
@@ -738,10 +805,14 @@ function build(input: TypeScriptCodeGraphExtractorInput): CodeGraphV2 {
     fileIds: new Map(),
     paths: new Set(uniqueFiles.map((item) => item.path)),
     moduleConfigs: moduleConfigs(allFiles),
+    workspacePackages: workspacePackages(allFiles),
     truncated: false,
   };
   for (const item of allFiles) {
-    if (!supportedPattern.test(item.path) && !/(?:^|\/)tsconfig\.json$/.test(item.path)) {
+    if (
+      !supportedPattern.test(item.path) &&
+      !/(?:^|\/)(?:tsconfig|package)\.json$/.test(item.path)
+    ) {
       context.diagnostics.push({
         code: "SOURCE_FILE_UNSUPPORTED",
         severity: "warning",
@@ -846,6 +917,13 @@ function build(input: TypeScriptCodeGraphExtractorInput): CodeGraphV2 {
   };
   return canonicalizeCodeGraph(graph) as CodeGraphV2;
 }
+
+export const typeScriptCodeGraphParser: CodeGraphParser = {
+  id: "typescript",
+  version: "1.0.0",
+  supports: (path) => supportedPattern.test(path),
+  parse: (input) => build(input),
+};
 
 export function extractTypeScriptCodeGraph(input: TypeScriptCodeGraphExtractorInput): CodeGraphV2;
 export function extractTypeScriptCodeGraph(

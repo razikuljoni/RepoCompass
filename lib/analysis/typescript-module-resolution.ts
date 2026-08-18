@@ -11,6 +11,12 @@ export type TypeScriptModuleResolutionConfig = {
   paths: Readonly<Record<string, readonly string[]>>;
 };
 
+export type TypeScriptWorkspacePackage = {
+  name: string;
+  root: string;
+  entries: Readonly<Record<string, readonly string[]>>;
+};
+
 const extensions = [".ts", ".tsx", ".mts", ".cts", ".d.ts", ".js", ".jsx", ".mjs", ".cjs"] as const;
 const javascriptExtensions = [".js", ".jsx", ".mjs", ".cjs"] as const;
 
@@ -44,7 +50,7 @@ function isWithin(path: string, parent: string): boolean {
   return !parent || path === parent || path.startsWith(`${parent}/`);
 }
 
-function probe(base: string, paths: ReadonlySet<string>): string | undefined {
+function probe(base: string, paths: ReadonlySet<string>): string[] {
   const attempted: string[] = [base];
   const extension = extensions.find((item) => base.endsWith(item));
   if (
@@ -58,7 +64,7 @@ function probe(base: string, paths: ReadonlySet<string>): string | undefined {
     attempted.push(...extensions.map((item) => `${base}${item}`));
     attempted.push(...extensions.map((item) => `${base}/index${item}`));
   }
-  return attempted.find((item) => paths.has(item));
+  return attempted.filter((item) => paths.has(item));
 }
 
 function patternMatch(pattern: string, specifier: string): string | undefined {
@@ -102,13 +108,30 @@ function resolveBases(
   bases: readonly string[],
   paths: ReadonlySet<string>,
 ): TypeScriptModuleResolution {
-  for (const base of bases) {
-    const normalized = normalize(base);
-    if (!normalized) continue;
-    const resolvedPath = probe(normalized, paths);
-    if (resolvedPath) return { resolution: "resolved", candidates: [resolvedPath], resolvedPath };
-  }
-  return { resolution: "unresolved", candidates: [] };
+  const candidates = [
+    ...new Set(
+      bases.flatMap((base) => {
+        const normalized = normalize(base);
+        return normalized ? probe(normalized, paths) : [];
+      }),
+    ),
+  ].sort(compareCodeUnits);
+  if (candidates.length > 1) return { resolution: "ambiguous", candidates };
+  const resolvedPath = candidates[0];
+  return resolvedPath
+    ? { resolution: "resolved", candidates, resolvedPath }
+    : { resolution: "unresolved", candidates };
+}
+
+function workspaceSpecifier(
+  specifier: string,
+  workspacePackages: readonly TypeScriptWorkspacePackage[],
+): { packages: TypeScriptWorkspacePackage[]; subpath: string } | undefined {
+  const name = packageName(specifier);
+  const packages = workspacePackages.filter((item) => item.name === name);
+  if (!packages.length) return undefined;
+  const remainder = specifier.slice(name.length);
+  return { packages, subpath: remainder ? `.${remainder}` : "." };
 }
 
 export function resolveTypeScriptModule(
@@ -116,6 +139,7 @@ export function resolveTypeScriptModule(
   importerPath: string,
   repositoryPaths: ReadonlySet<string> | readonly string[],
   configs: readonly TypeScriptModuleResolutionConfig[] = [],
+  workspacePackages: readonly TypeScriptWorkspacePackage[] = [],
 ): TypeScriptModuleResolution {
   const paths = repositoryPaths instanceof Set ? repositoryPaths : new Set(repositoryPaths);
   if (specifier.startsWith(".") || specifier.startsWith("/")) {
@@ -123,6 +147,15 @@ export function resolveTypeScriptModule(
       ? specifier.slice(1)
       : `${directory(importerPath)}/${specifier}`;
     return resolveBases([base], paths);
+  }
+  const workspace = workspaceSpecifier(specifier, workspacePackages);
+  if (workspace) {
+    const bases = workspace.packages.flatMap((item) =>
+      (item.entries[workspace.subpath] ?? []).map((entry) => `${item.root}/${entry}`),
+    );
+    const resolution = resolveBases(bases, paths);
+    if (resolution.resolution !== "unresolved") return resolution;
+    return { ...resolution, packageName: packageName(specifier) };
   }
   const config = nearestConfig(importerPath, configs);
   if (config) {
